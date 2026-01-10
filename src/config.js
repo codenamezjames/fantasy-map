@@ -147,11 +147,11 @@ export const CONFIG = {
             specialToSettlement: 1
         },
         rendering: {
-            majorWidth: 3,
-            minorWidth: 2,
-            pathWidth: 1,
+            majorWidth: 4,
+            minorWidth: 2.5,
+            pathWidth: 1.5,
             color: { h: 35, s: 30, l: 40 },  // Brown/tan
-            opacity: 0.7
+            opacity: 0.85
         }
     },
 
@@ -184,9 +184,9 @@ export const CONFIG = {
             coreOpacity: 0.9,
             coreWidth: 2,
             flowWidthMultiplier: 0.1,
-            zoomWidthPower: 2,      // How much rivers thin when zoomed out (1 = no change, 2 = very thin)
-            zoomOpacityMin: 0.1,      // River opacity when fully zoomed out (0 = invisible)
-            zoomOpacityScale: 2       // How quickly rivers become opaque as you zoom in
+            zoomWidthPower: 1,        // How much rivers thin when zoomed out (1 = no change, 2 = very thin)
+            zoomOpacityMin: 0.9,      // River opacity when fully zoomed out (0 = invisible)
+            zoomOpacityScale: 0.1     // How quickly rivers become opaque as you zoom in
         }
     }
 };
