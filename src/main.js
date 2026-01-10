@@ -73,6 +73,7 @@ class MapGenerator {
         // UI options - load from localStorage
         this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
         this.showTileBorders = localStorage.getItem('mapGenerator.showTileBorders') !== 'false';
+        this.showGradientBlend = localStorage.getItem('mapGenerator.showGradientBlend') === 'true';
     }
 
     /**
@@ -95,6 +96,17 @@ class MapGenerator {
     setShowTileBorders(show) {
         this.showTileBorders = show;
         localStorage.setItem('mapGenerator.showTileBorders', show);
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Toggle gradient blend between tiles
+     */
+    setShowGradientBlend(show) {
+        this.showGradientBlend = show;
+        localStorage.setItem('mapGenerator.showGradientBlend', show);
         if (this.viewer) {
             this.viewer.render();
         }
@@ -214,6 +226,15 @@ class MapGenerator {
                 this.setShowTileBorders(e.target.checked);
             });
         }
+
+        // Setup gradient blend toggle
+        const gradientBlendToggle = document.getElementById('gradient-blend-toggle');
+        if (gradientBlendToggle) {
+            gradientBlendToggle.checked = this.showGradientBlend;
+            gradientBlendToggle.addEventListener('change', (e) => {
+                this.setShowGradientBlend(e.target.checked);
+            });
+        }
     }
 
     /**
@@ -328,8 +349,12 @@ class MapGenerator {
             }
             ctx.closePath();
 
-            // Fill with theme color
-            ctx.fillStyle = this.theme.getTileColor(tile);
+            // Fill with gradient or solid color
+            if (this.showGradientBlend) {
+                ctx.fillStyle = this.getTileGradient(ctx, tile);
+            } else {
+                ctx.fillStyle = this.theme.getTileColor(tile);
+            }
             ctx.fill();
 
             // Stroke outline (if enabled)
@@ -339,6 +364,63 @@ class MapGenerator {
                 ctx.stroke();
             }
         }
+    }
+
+    /**
+     * Create a radial gradient for a tile that blends toward neighbor colors
+     */
+    getTileGradient(ctx, tile) {
+        const [cx, cy] = tile.center;
+        const tileHSL = this.theme.getTileHSL(tile);
+
+        // Calculate tile radius (distance to farthest vertex)
+        let maxDist = 0;
+        for (const v of tile.vertices) {
+            const dist = Math.hypot(v[0] - cx, v[1] - cy);
+            if (dist > maxDist) maxDist = dist;
+        }
+
+        // Calculate average neighbor color
+        let avgH = 0, avgS = 0, avgL = 0, count = 0;
+        for (const neighborId of tile.neighbors) {
+            const neighbor = this.world.getTile(neighborId);
+            if (neighbor) {
+                const nHSL = this.theme.getTileHSL(neighbor);
+                // Handle hue wrapping for averaging
+                let hDiff = nHSL.h - tileHSL.h;
+                if (hDiff > 180) hDiff -= 360;
+                if (hDiff < -180) hDiff += 360;
+                avgH += tileHSL.h + hDiff;
+                avgS += nHSL.s;
+                avgL += nHSL.l;
+                count++;
+            }
+        }
+
+        // Create gradient
+        const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxDist);
+
+        // Inner: tile's own color
+        gradient.addColorStop(0, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
+        gradient.addColorStop(0.5, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
+
+        // Outer: blend toward neighbor average (if we have neighbors)
+        if (count > 0) {
+            avgH = ((avgH / count) + 360) % 360;
+            avgS /= count;
+            avgL /= count;
+
+            // Blend 40% toward neighbor average at edges
+            const blendH = (tileHSL.h * 0.6 + avgH * 0.4 + 360) % 360;
+            const blendS = tileHSL.s * 0.6 + avgS * 0.4;
+            const blendL = tileHSL.l * 0.6 + avgL * 0.4;
+
+            gradient.addColorStop(1, `hsl(${blendH}, ${blendS}%, ${blendL}%)`);
+        } else {
+            gradient.addColorStop(1, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
+        }
+
+        return gradient;
     }
 
     /**

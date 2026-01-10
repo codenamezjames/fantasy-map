@@ -356,6 +356,13 @@ export class Theme {
     }
 
     /**
+     * Get tile HSL values directly (for gradient calculations)
+     */
+    getTileHSL(tile) {
+        return this.current.getTileHSL(tile);
+    }
+
+    /**
      * Get tile stroke color
      */
     getTileStroke() {
