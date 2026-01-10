@@ -1,0 +1,24 @@
+{
+  "name": "fanticy-map-generator",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "start": "vite --port 8765",
+    "build": "vite build",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "d3-delaunay": "^6.0.4",
+    "seedrandom": "^3.0.5",
+    "simplex-noise": "^4.0.3"
+  },
+  "devDependencies": {
+    "serve": "^14.2.5",
+    "vite": "^7.3.1"
+  }
+}
