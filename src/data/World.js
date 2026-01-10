@@ -21,6 +21,9 @@ export class World {
         this.pois = new Map();              // id -> POI
         this.poiSpatialIndex = new Map();   // tileId -> poiId[]
         this.nextPoiId = 0;
+
+        // Region storage
+        this.regions = new Map();           // regionId -> region metadata
     }
 
     /**
@@ -243,6 +246,33 @@ export class World {
         return result;
     }
 
+    // ========== Region Methods ==========
+
+    /**
+     * Add a region to the world
+     * @param {Object} region - Region metadata {id, capitalId, name, color, tileCount}
+     */
+    addRegion(region) {
+        this.regions.set(region.id, region);
+    }
+
+    /**
+     * Get a region by ID
+     * @param {number} id - Region ID
+     * @returns {Object|undefined} Region metadata
+     */
+    getRegion(id) {
+        return this.regions.get(id);
+    }
+
+    /**
+     * Get all regions
+     * @returns {Object[]} Array of region metadata objects
+     */
+    getAllRegions() {
+        return [...this.regions.values()];
+    }
+
     /**
      * Find tile containing a world position
      * @param {number} x - World X coordinate
@@ -290,6 +320,7 @@ export class World {
         this.pois.clear();
         this.poiSpatialIndex.clear();
         this.nextPoiId = 0;
+        this.regions.clear();
     }
 
     /**
@@ -302,7 +333,8 @@ export class World {
             height: this.height,
             tileCount: this.tileCount,
             tiles: this.getAllTiles().map(t => t.toJSON()),
-            pois: this.getAllPOIs().map(p => p.toJSON())
+            pois: this.getAllPOIs().map(p => p.toJSON()),
+            regions: this.getAllRegions()
         };
     }
 
@@ -325,6 +357,13 @@ export class World {
         if (data.pois) {
             for (const poiData of data.pois) {
                 world.addPOI(POI.fromJSON(poiData));
+            }
+        }
+
+        // Load regions if present
+        if (data.regions) {
+            for (const region of data.regions) {
+                world.addRegion(region);
             }
         }
 

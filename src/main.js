@@ -10,6 +10,7 @@ import { WaterGenerator } from './generation/WaterGenerator.js';
 import { SubTileGenerator } from './generation/SubTileGenerator.js';
 import { TileLoadManager } from './generation/TileLoadManager.js';
 import { POIGenerator } from './generation/POIGenerator.js';
+import { RegionGenerator } from './generation/RegionGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 
@@ -49,6 +50,10 @@ class MapGenerator {
         this.poiRng = new SeededRandom(CONFIG.pois?.seed || 'pois-1');
         this.poiGenerator = new POIGenerator(this.poiRng);
 
+        // Separate RNG for regions
+        this.regionRng = new SeededRandom(CONFIG.regions?.seed || 'regions-1');
+        this.regionGenerator = new RegionGenerator(this.regionRng);
+
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
         this.tileLoadManager = null; // Created after world generation
@@ -56,6 +61,26 @@ class MapGenerator {
         // Theme - load from localStorage or default to 'dark'
         const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
         this.theme = new Theme(savedTheme);
+
+        // Selected region for highlighting
+        this.selectedRegionId = null;
+
+        // UI options - load from localStorage
+        this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
+    }
+
+    /**
+     * Toggle region visibility
+     */
+    setShowRegions(show) {
+        this.showRegions = show;
+        localStorage.setItem('mapGenerator.showRegions', show);
+        if (!show) {
+            this.selectedRegionId = null; // Clear selection when hiding
+        }
+        if (this.viewer) {
+            this.viewer.render();
+        }
     }
 
     /**
@@ -154,6 +179,15 @@ class MapGenerator {
         select.addEventListener('change', (e) => {
             this.setTheme(e.target.value);
         });
+
+        // Setup regions toggle
+        const regionsToggle = document.getElementById('regions-toggle');
+        if (regionsToggle) {
+            regionsToggle.checked = this.showRegions;
+            regionsToggle.addEventListener('change', (e) => {
+                this.setShowRegions(e.target.checked);
+            });
+        }
     }
 
     /**
@@ -189,6 +223,9 @@ class MapGenerator {
         this.poiGenerator.generate(this.world);
         console.log('POIs generated:', this.world.pois.size);
 
+        // Generate regions (grow from capitals)
+        this.regionGenerator.generate(this.world);
+
         // Set zoom thresholds from config
         this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
 
@@ -217,6 +254,12 @@ class MapGenerator {
 
         // Draw rivers
         this.drawRivers(ctx, camera);
+
+        // Draw region borders and selection (if enabled)
+        if (this.showRegions) {
+            this.drawRegionBorders(ctx, camera);
+            this.drawSelectedRegion(ctx, camera);
+        }
 
         // Draw POIs
         this.drawPOIs(ctx, camera);
@@ -478,8 +521,27 @@ class MapGenerator {
         const poi = this.findPOIAtPosition(worldPos.x, worldPos.y);
         if (poi) {
             this.showPOIDialog(poi);
+            this.selectRegion(poi.regionId);
         } else {
             this.hidePOIDialog();
+            // Check if clicked on a tile with a region
+            const tile = this.world?.getTileAtPosition(worldPos.x, worldPos.y);
+            if (tile && tile.regionId !== null) {
+                this.selectRegion(tile.regionId);
+            } else {
+                this.selectRegion(null);
+            }
+        }
+    }
+
+    /**
+     * Select a region to highlight
+     * @param {number|null} regionId - Region ID to highlight, or null to clear
+     */
+    selectRegion(regionId) {
+        if (this.selectedRegionId !== regionId) {
+            this.selectedRegionId = regionId;
+            this.viewer.render();
         }
     }
 
@@ -555,10 +617,18 @@ class MapGenerator {
         dialog.querySelector('.poi-dialog-type').textContent = typeDisplay;
         dialog.querySelector('.poi-dialog-type').className = `poi-dialog-type poi-type-${poi.type}`;
 
+        // Get region name
+        const region = poi.regionId !== null ? this.world.getRegion(poi.regionId) : null;
+        const regionName = region?.name || 'Unclaimed';
+
         const detailsHTML = `
             <div class="poi-detail-row">
                 <span class="poi-detail-label">Population:</span>
                 <span class="poi-detail-value">${population}</span>
+            </div>
+            <div class="poi-detail-row">
+                <span class="poi-detail-label">Region:</span>
+                <span class="poi-detail-value">${regionName}</span>
             </div>
             <div class="poi-detail-row">
                 <span class="poi-detail-label">Biome:</span>
@@ -765,6 +835,109 @@ class MapGenerator {
             ctx.lineTo(seg.mid[0], seg.mid[1]);
             ctx.lineTo(seg.to[0], seg.to[1]);
             ctx.stroke();
+        }
+    }
+
+    /**
+     * Draw region borders between different kingdoms
+     */
+    drawRegionBorders(ctx, camera) {
+        if (!this.world) return;
+
+        const viewport = camera.getViewport();
+        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+        const drawnEdges = new Set();
+
+        const config = CONFIG.regions || {};
+        const borderWidth = config.borderWidth || 2;
+        const borderOpacity = config.borderOpacity || 0.7;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        for (const tile of tiles) {
+            if (tile.regionId === null) continue;
+
+            for (const neighborId of tile.neighbors) {
+                // Skip duplicate edges
+                const edgeKey = tile.id < neighborId
+                    ? `${tile.id}-${neighborId}`
+                    : `${neighborId}-${tile.id}`;
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
+
+                const neighbor = this.world.getTile(neighborId);
+                if (!neighbor) continue;
+
+                // Draw border if different regions (and neighbor has a region)
+                if (tile.regionId !== neighbor.regionId && neighbor.regionId !== null) {
+                    const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                    if (!sharedEdge) continue;
+
+                    // Get region color for border
+                    const region = this.world.getRegion(tile.regionId);
+                    const color = region?.color || { h: 0, s: 0, l: 50 };
+
+                    ctx.strokeStyle = `hsla(${color.h}, ${color.s}%, ${color.l}%, ${borderOpacity})`;
+                    ctx.lineWidth = borderWidth / camera.scale;
+
+                    ctx.beginPath();
+                    ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+                    ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+                    ctx.stroke();
+                }
+            }
+        }
+    }
+
+    /**
+     * Draw highlight outline around the selected region's tiles
+     */
+    drawSelectedRegion(ctx, camera) {
+        if (!this.world || this.selectedRegionId === null) return;
+
+        const viewport = camera.getViewport();
+        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+
+        // Get region color
+        const region = this.world.getRegion(this.selectedRegionId);
+        const color = region?.color || { h: 0, s: 0, l: 50 };
+
+        // Draw outer edges of selected region (edges where neighbor is different region or water)
+        const drawnEdges = new Set();
+
+        ctx.strokeStyle = `hsla(${color.h}, ${Math.min(100, color.s + 30)}%, ${Math.min(90, color.l + 20)}%, 0.9)`;
+        ctx.lineWidth = 3 / camera.scale;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        for (const tile of tiles) {
+            if (tile.regionId !== this.selectedRegionId) continue;
+
+            for (const neighborId of tile.neighbors) {
+                const edgeKey = tile.id < neighborId
+                    ? `${tile.id}-${neighborId}`
+                    : `${neighborId}-${tile.id}`;
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
+
+                const neighbor = this.world.getTile(neighborId);
+
+                // Draw edge if neighbor is different region, water, or doesn't exist
+                const isDifferentRegion = !neighbor || neighbor.regionId !== this.selectedRegionId;
+                if (isDifferentRegion) {
+                    const sharedEdge = neighbor
+                        ? this.findSharedEdge(tile.vertices, neighbor.vertices)
+                        : null;
+
+                    if (sharedEdge) {
+                        ctx.beginPath();
+                        ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+                        ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+                        ctx.stroke();
+                    }
+                }
+            }
         }
     }
 

@@ -103,6 +103,27 @@ export const CONFIG = {
         }
     },
 
+    // Regions / Kingdoms
+    regions: {
+        seed: 'regions-1',
+        costs: {
+            base: 1,
+            riverCrossing: 5,
+            mountainBase: 8,
+            mountainSteep: 15,
+            elevationPenalty: 10
+        },
+        colors: [
+            { h: 0, s: 35, l: 45 },    // Red
+            { h: 45, s: 35, l: 45 },   // Orange
+            { h: 120, s: 35, l: 40 },  // Green
+            { h: 210, s: 35, l: 45 },  // Blue
+            { h: 280, s: 35, l: 45 }   // Purple
+        ],
+        borderWidth: 2,
+        borderOpacity: 0.7
+    },
+
     // Visual rendering
     rendering: {
         // Elevation lightness shift
