@@ -72,6 +72,7 @@ class MapGenerator {
 
         // UI options - load from localStorage
         this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
+        this.showTileBorders = localStorage.getItem('mapGenerator.showTileBorders') !== 'false';
     }
 
     /**
@@ -83,6 +84,17 @@ class MapGenerator {
         if (!show) {
             this.selectedRegionId = null; // Clear selection when hiding
         }
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Toggle tile border visibility
+     */
+    setShowTileBorders(show) {
+        this.showTileBorders = show;
+        localStorage.setItem('mapGenerator.showTileBorders', show);
         if (this.viewer) {
             this.viewer.render();
         }
@@ -191,6 +203,15 @@ class MapGenerator {
             regionsToggle.checked = this.showRegions;
             regionsToggle.addEventListener('change', (e) => {
                 this.setShowRegions(e.target.checked);
+            });
+        }
+
+        // Setup tile borders toggle
+        const tileBordersToggle = document.getElementById('tile-borders-toggle');
+        if (tileBordersToggle) {
+            tileBordersToggle.checked = this.showTileBorders;
+            tileBordersToggle.addEventListener('change', (e) => {
+                this.setShowTileBorders(e.target.checked);
             });
         }
     }
@@ -311,10 +332,12 @@ class MapGenerator {
             ctx.fillStyle = this.theme.getTileColor(tile);
             ctx.fill();
 
-            // Stroke outline
-            ctx.strokeStyle = this.theme.getTileStroke();
-            ctx.lineWidth = 1 / camera.scale;
-            ctx.stroke();
+            // Stroke outline (if enabled)
+            if (this.showTileBorders) {
+                ctx.strokeStyle = this.theme.getTileStroke();
+                ctx.lineWidth = 1 / camera.scale;
+                ctx.stroke();
+            }
         }
     }
 
