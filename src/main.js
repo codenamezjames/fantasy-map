@@ -8,6 +8,7 @@ import { MoistureGenerator } from './generation/MoistureGenerator.js';
 import { BiomeGenerator } from './generation/BiomeGenerator.js';
 import { WaterGenerator } from './generation/WaterGenerator.js';
 import { Theme } from './rendering/Theme.js';
+import { CONFIG } from './config.js';
 
 /**
  * Fantasy Map Generator
@@ -16,9 +17,9 @@ import { Theme } from './rendering/Theme.js';
 class MapGenerator {
     constructor(config = {}) {
         this.config = {
-            seed: config.seed || 'fantasy-world-42',
-            worldWidth: config.worldWidth || 2000,
-            worldHeight: config.worldHeight || 2000,
+            seed: config.seed || CONFIG.seed || 'default',
+            worldWidth: config.worldWidth || CONFIG.world.width,
+            worldHeight: config.worldHeight || CONFIG.world.height,
             ...config
         };
 
@@ -30,22 +31,28 @@ class MapGenerator {
 
         // World data
         this.world = null;
-        this.voronoiGenerator = new VoronoiGenerator(this.rng);
+        // Pass noise to VoronoiGenerator for density-based tile generation
+        this.voronoiGenerator = new VoronoiGenerator(this.rng, this.noise);
         this.elevationGenerator = new ElevationGenerator(this.noise);
         this.temperatureGenerator = new TemperatureGenerator(this.noise);
         this.moistureGenerator = new MoistureGenerator(this.noise);
         this.biomeGenerator = new BiomeGenerator();
-        this.waterGenerator = new WaterGenerator();
 
-        // Theme
-        this.theme = new Theme('dark');
+        // Separate RNG for rivers so they can be regenerated independently
+        this.riverRng = new SeededRandom(CONFIG.water.riverSeed);
+        this.waterGenerator = new WaterGenerator(this.riverRng);
+
+        // Theme - load from localStorage or default to 'dark'
+        const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
+        this.theme = new Theme(savedTheme);
     }
 
     /**
-     * Set the current theme
+     * Set the current theme and persist to localStorage
      */
     setTheme(themeName) {
         this.theme.set(themeName);
+        localStorage.setItem('mapGenerator.theme', themeName);
         if (this.viewer) {
             this.viewer.render();
         }
@@ -94,10 +101,38 @@ class MapGenerator {
         // Generate world with Voronoi tiles
         this.generateWorld();
 
+        // Setup UI
+        this.setupThemeUI();
+
         // Initial render
         this.viewer.render();
 
         return true;
+    }
+
+    /**
+     * Setup theme selector UI
+     */
+    setupThemeUI() {
+        const select = document.getElementById('theme-select');
+        if (!select) return;
+
+        // Populate options
+        const themes = Theme.getThemeList();
+        for (const theme of themes) {
+            const option = document.createElement('option');
+            option.value = theme.id;
+            option.textContent = theme.name;
+            if (theme.id === this.theme.currentName) {
+                option.selected = true;
+            }
+            select.appendChild(option);
+        }
+
+        // Handle change
+        select.addEventListener('change', (e) => {
+            this.setTheme(e.target.value);
+        });
     }
 
     /**
@@ -108,11 +143,11 @@ class MapGenerator {
             seed: this.config.seed,
             width: this.config.worldWidth,
             height: this.config.worldHeight,
-            tileCount: 10000
+            tileCount: CONFIG.world.tileCount
         });
 
         // Apply Lloyd relaxation for more uniform cells
-        this.voronoiGenerator.relax(this.world, 2);
+        this.voronoiGenerator.relax(this.world, CONFIG.world.relaxationIterations);
 
         console.log('World generated with', this.world.tiles.size, 'tiles');
 
@@ -186,7 +221,64 @@ class MapGenerator {
     }
 
     /**
-     * Draw rivers along tile edges
+     * Draw contour lines at elevation intervals
+     * Lines are drawn on edges where neighbors cross elevation thresholds
+     */
+    drawContours(ctx, camera) {
+        if (!this.world) return;
+
+        const viewport = camera.getViewport();
+        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+
+        // Contour intervals - major every 0.2, minor every 0.1
+        const majorInterval = 0.2;
+        const minorInterval = 0.1;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        const drawnEdges = new Set();
+
+        for (const tile of tiles) {
+            if (tile.isWater) continue;
+
+            for (const neighborId of tile.neighbors) {
+                const edgeKey = tile.id < neighborId ? `${tile.id}-${neighborId}` : `${neighborId}-${tile.id}`;
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
+
+                const neighbor = this.world.getTile(neighborId);
+                if (!neighbor || neighbor.isWater) continue;
+
+                const minElev = Math.min(tile.elevation, neighbor.elevation);
+                const maxElev = Math.max(tile.elevation, neighbor.elevation);
+
+                // Check for contour crossings
+                for (let level = minorInterval; level < 1; level += minorInterval) {
+                    if (minElev < level && maxElev >= level) {
+                        const isMajor = Math.abs(level % majorInterval) < 0.01;
+                        const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                        if (!sharedEdge) continue;
+
+                        // Draw contour segment along shared edge
+                        ctx.strokeStyle = isMajor
+                            ? 'rgba(0, 0, 0, 0.45)'
+                            : 'rgba(0, 0, 0, 0.22)';
+                        ctx.lineWidth = (isMajor ? 1.8 : 1) / camera.scale;
+
+                        ctx.beginPath();
+                        ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+                        ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+                        ctx.stroke();
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Draw all river edges - handles branches and junctions
+     * Uses multi-pass rendering for feathered edges
      */
     drawRivers(ctx, camera) {
         if (!this.world) return;
@@ -194,33 +286,95 @@ class MapGenerator {
         const viewport = camera.getViewport();
         const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
 
-        ctx.strokeStyle = 'hsl(200, 70%, 45%)';
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
+
+        // Collect river segments to draw
+        const segments = [];
+        const drawnEdges = new Set();
 
         for (const tile of tiles) {
             if (tile.riverEdges.length === 0) continue;
 
             for (const neighborId of tile.riverEdges) {
-                // Only draw each edge once (lower id draws)
-                if (neighborId > tile.id) continue;
+                const edgeKey = tile.id < neighborId ? `${tile.id}-${neighborId}` : `${neighborId}-${tile.id}`;
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
 
                 const neighbor = this.world.getTile(neighborId);
                 if (!neighbor) continue;
 
-                // Find shared edge vertices between tiles
                 const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
                 if (!sharedEdge) continue;
 
-                // River width based on flow accumulation
-                const flow = Math.min(tile.riverFlow || 1, 10);
-                ctx.lineWidth = (2 + flow * 0.8) / camera.scale;
+                const flow = Math.min((tile.riverFlow || 1) + (neighbor.riverFlow || 1), 20) / 2;
+                const mid = [
+                    (sharedEdge[0][0] + sharedEdge[1][0]) / 2,
+                    (sharedEdge[0][1] + sharedEdge[1][1]) / 2
+                ];
 
+                // Stop at edge when reaching water - don't draw into water tile centers
+                const from = tile.isWater ? mid : tile.center;
+                const to = neighbor.isWater ? mid : neighbor.center;
+
+                // Skip if both are water (nothing to draw)
+                if (tile.isWater && neighbor.isWater) continue;
+
+                segments.push({
+                    from,
+                    mid,
+                    to,
+                    flow
+                });
+            }
+        }
+
+        // Get river color from theme (10% darker than ocean)
+        const { h, s, l } = this.theme.getRiverHSL();
+        const riverL = Math.max(5, l - 10);
+
+        // Zoom-based scaling: thinner and more transparent when zoomed out
+        // Power formula: scale^power where power>1 makes rivers thinner at low zoom
+        const { zoomWidthPower, zoomOpacityMin, zoomOpacityScale } = CONFIG.rendering.rivers;
+        const zoomWidth = Math.pow(Math.min(1, camera.scale), zoomWidthPower);
+        const zoomOpacity = Math.min(1, zoomOpacityMin + camera.scale * zoomOpacityScale);
+
+        // Only draw feathering when zoomed in enough (scale > 1.5 = 150% zoom)
+        const drawFeathering = camera.scale > 1.5;
+
+        if (drawFeathering) {
+            // Pass 1: Outer glow
+            ctx.strokeStyle = `hsla(${h}, ${s}%, ${riverL + 5}%, 0.12)`;
+            for (const seg of segments) {
+                ctx.lineWidth = (5 + seg.flow * 0.6) * zoomWidth / camera.scale;
                 ctx.beginPath();
-                ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
-                ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+                ctx.moveTo(seg.from[0], seg.from[1]);
+                ctx.lineTo(seg.mid[0], seg.mid[1]);
+                ctx.lineTo(seg.to[0], seg.to[1]);
                 ctx.stroke();
             }
+
+            // Pass 2: Middle blend
+            ctx.strokeStyle = `hsla(${h}, ${s}%, ${riverL + 3}%, 0.25)`;
+            for (const seg of segments) {
+                ctx.lineWidth = (3.5 + seg.flow * 0.5) * zoomWidth / camera.scale;
+                ctx.beginPath();
+                ctx.moveTo(seg.from[0], seg.from[1]);
+                ctx.lineTo(seg.mid[0], seg.mid[1]);
+                ctx.lineTo(seg.to[0], seg.to[1]);
+                ctx.stroke();
+            }
+        }
+
+        // Core - always drawn
+        ctx.strokeStyle = `hsla(${h}, ${s}%, ${riverL}%, ${CONFIG.rendering.rivers.coreOpacity * zoomOpacity})`;
+        for (const seg of segments) {
+            ctx.lineWidth = (CONFIG.rendering.rivers.coreWidth + seg.flow * CONFIG.rendering.rivers.flowWidthMultiplier) * zoomWidth / camera.scale;
+            ctx.beginPath();
+            ctx.moveTo(seg.from[0], seg.from[1]);
+            ctx.lineTo(seg.mid[0], seg.mid[1]);
+            ctx.lineTo(seg.to[0], seg.to[1]);
+            ctx.stroke();
         }
     }
 
@@ -308,9 +462,9 @@ class MapGenerator {
 // Initialize on DOM load
 document.addEventListener('DOMContentLoaded', () => {
     const generator = new MapGenerator({
-        seed: 'fantasy-world-42',
-        worldWidth: 2000,
-        worldHeight: 2000
+        seed: CONFIG.seed,
+        worldWidth: CONFIG.world.width,
+        worldHeight: CONFIG.world.height
     });
 
     generator.init();

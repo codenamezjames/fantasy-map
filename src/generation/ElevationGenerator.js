@@ -1,3 +1,5 @@
+import { CONFIG } from '../config.js';
+
 /**
  * ElevationGenerator - generates terrain elevation using multi-layer noise
  */
@@ -5,9 +7,9 @@ export class ElevationGenerator {
     constructor(noise) {
         this.noise = noise;
 
-        // Configuration
-        this.seaLevel = 0.35;      // Tiles below this are water
-        this.edgeMargin = 0.15;    // 15% border for ocean falloff
+        // Configuration from central config
+        this.seaLevel = CONFIG.elevation.seaLevel;
+        this.edgeMargin = CONFIG.elevation.edgeMargin;
     }
 
     /**
@@ -30,6 +32,9 @@ export class ElevationGenerator {
 
         // Mark coastal tiles (land adjacent to water)
         this.markCoastalTiles(world);
+
+        // Calculate slopes for hillshading
+        this.calculateSlopes(world);
 
         // Log stats
         const tiles = world.getAllTiles();
@@ -96,6 +101,53 @@ export class ElevationGenerator {
                     return neighbor && neighbor.isWater;
                 });
             }
+        }
+    }
+
+    /**
+     * Calculate slope for each tile (for hillshading)
+     * Slope is the gradient vector pointing uphill
+     */
+    calculateSlopes(world) {
+        for (const tile of world.getAllTiles()) {
+            if (tile.isWater) {
+                tile.slope = { x: 0, y: 0, magnitude: 0 };
+                continue;
+            }
+
+            let slopeX = 0;
+            let slopeY = 0;
+            let count = 0;
+
+            for (const neighborId of tile.neighbors) {
+                const neighbor = world.getTile(neighborId);
+                if (!neighbor) continue;
+
+                // Direction from tile to neighbor
+                const dx = neighbor.center[0] - tile.center[0];
+                const dy = neighbor.center[1] - tile.center[1];
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist === 0) continue;
+
+                // Elevation difference (positive = neighbor is higher)
+                const dElev = neighbor.elevation - tile.elevation;
+
+                // Accumulate slope contribution
+                slopeX += (dx / dist) * dElev;
+                slopeY += (dy / dist) * dElev;
+                count++;
+            }
+
+            if (count > 0) {
+                slopeX /= count;
+                slopeY /= count;
+            }
+
+            tile.slope = {
+                x: slopeX,
+                y: slopeY,
+                magnitude: Math.sqrt(slopeX * slopeX + slopeY * slopeY)
+            };
         }
     }
 }

@@ -1,3 +1,5 @@
+import { CONFIG } from '../config.js';
+
 /**
  * Theme - controls visual styling for map rendering
  */
@@ -24,18 +26,66 @@ const BIOME_COLORS = {
 
 /**
  * Get biome-based tile color (default palette)
+ * Applies elevation lightness shift and hillshading
  */
 function getBiomeHSL(tile, colors = BIOME_COLORS) {
+    let base;
+
     if (tile.isWater) {
         const depth = Math.min(1, tile.waterDepth * 3);
-        const base = colors.ocean || BIOME_COLORS.ocean;
-        return { h: base.h, s: base.s, l: base.l - depth * 10 };
+        const oceanBase = colors.ocean || BIOME_COLORS.ocean;
+        return { h: oceanBase.h, s: oceanBase.s, l: oceanBase.l - depth * 10 };
     }
+
     if (tile.biome && colors[tile.biome]) {
-        return colors[tile.biome];
+        base = { ...colors[tile.biome] };
+    } else {
+        // Fallback to elevation-based
+        base = getElevationHSL(tile);
     }
-    // Fallback to elevation-based
-    return getElevationHSL(tile);
+
+    // Elevation lightness shift: higher = lighter, lower = darker
+    const elevShift = (tile.elevation - CONFIG.rendering.elevationShift.baseline) * CONFIG.rendering.elevationShift.multiplier;
+    base.l = Math.max(10, Math.min(90, base.l + elevShift));
+
+    // Elevation tinting: cool at high, warm at low
+    if (CONFIG.rendering.elevationTint?.enabled) {
+        const { highHueShift, lowHueShift } = CONFIG.rendering.elevationTint;
+        const elevNorm = tile.elevation; // 0-1
+        // Interpolate: low elevation = lowHueShift, high elevation = highHueShift
+        const hueShift = lowHueShift + (highHueShift - lowHueShift) * elevNorm;
+        base.h = (base.h + hueShift + 360) % 360;
+    }
+
+    // Saturation reduction at elevation extremes (peaks and valleys become grayer)
+    if (CONFIG.rendering.elevationSaturation?.enabled) {
+        const { extremeReduction, peakThreshold, valleyThreshold } = CONFIG.rendering.elevationSaturation;
+        let satReduction = 0;
+        if (tile.elevation > peakThreshold) {
+            // Above peak threshold - reduce saturation
+            const t = (tile.elevation - peakThreshold) / (1 - peakThreshold);
+            satReduction = t * extremeReduction;
+        } else if (tile.elevation < valleyThreshold) {
+            // Below valley threshold - reduce saturation
+            const t = (valleyThreshold - tile.elevation) / valleyThreshold;
+            satReduction = t * extremeReduction;
+        }
+        base.s = Math.max(5, base.s - satReduction);
+    }
+
+    // Hillshading: simulate NW light source
+    // slope is calculated from neighbors in tile.slope (if available)
+    if (tile.slope !== undefined) {
+        // slope.x positive = facing east, slope.y positive = facing south
+        // NW light means we want -x and -y to be bright
+        const lightAngle = Math.atan2(-1, -1); // NW direction
+        const slopeAngle = Math.atan2(tile.slope.y, tile.slope.x);
+        const angleDiff = Math.cos(slopeAngle - lightAngle);
+        const hillshade = angleDiff * tile.slope.magnitude * CONFIG.rendering.hillshade.multiplier;
+        base.l = Math.max(10, Math.min(90, base.l + hillshade));
+    }
+
+    return base;
 }
 
 /**
@@ -66,6 +116,7 @@ const THEMES = {
         borderColor: '#4a9eff',
         overlayBackground: 'rgba(0, 0, 0, 0.5)',
         overlayText: '#fff',
+        oceanColor: BIOME_COLORS.ocean,
         getTileHSL: (tile) => getBiomeHSL(tile)
     },
 
@@ -78,6 +129,7 @@ const THEMES = {
         borderColor: '#8b7355',
         overlayBackground: 'rgba(30, 20, 10, 0.7)',
         overlayText: '#d4c4a8',
+        oceanColor: { h: 30, s: 25, l: 18 },
         getTileHSL: (tile) => getBiomeHSL(tile, {
             ocean:              { h: 30, s: 25, l: 18 },
             lake:               { h: 32, s: 30, l: 28 },
@@ -105,6 +157,7 @@ const THEMES = {
         borderColor: '#8b7355',
         overlayBackground: 'rgba(139, 115, 85, 0.8)',
         overlayText: '#3d2914',
+        oceanColor: { h: 200, s: 20, l: 65 },
         getTileHSL: (tile) => getBiomeHSL(tile, {
             ocean:              { h: 200, s: 20, l: 65 },
             lake:               { h: 195, s: 25, l: 55 },
@@ -132,6 +185,7 @@ const THEMES = {
         borderColor: '#333',
         overlayBackground: 'rgba(0, 0, 0, 0.8)',
         overlayText: '#888',
+        oceanColor: { h: 210, s: 30, l: 12 },
         getTileHSL: (tile) => getBiomeHSL(tile, {
             ocean:              { h: 210, s: 30, l: 12 },
             lake:               { h: 200, s: 35, l: 22 },
@@ -159,6 +213,7 @@ const THEMES = {
         borderColor: '#2a5a8a',
         overlayBackground: 'rgba(10, 22, 40, 0.8)',
         overlayText: '#8ac4ff',
+        oceanColor: { h: 210, s: 70, l: 20 },
         getTileHSL: (tile) => getBiomeHSL(tile, {
             ocean:              { h: 210, s: 70, l: 20 },
             lake:               { h: 200, s: 60, l: 35 },
@@ -186,6 +241,7 @@ const THEMES = {
         borderColor: '#3a5a2a',
         overlayBackground: 'rgba(13, 26, 13, 0.8)',
         overlayText: '#a8d48a',
+        oceanColor: { h: 180, s: 40, l: 18 },
         getTileHSL: (tile) => getBiomeHSL(tile, {
             ocean:              { h: 180, s: 40, l: 18 },
             lake:               { h: 175, s: 45, l: 28 },
@@ -295,6 +351,13 @@ export class Theme {
      */
     getOverlayText() {
         return this.current.overlayText;
+    }
+
+    /**
+     * Get river color (based on ocean color)
+     */
+    getRiverHSL() {
+        return this.current.oceanColor;
     }
 
     /**
