@@ -41,6 +41,10 @@ export class Tile {
         this.detailGenerated = config.detailGenerated ?? false;
         this.childrenIds = config.childrenIds ?? [];
         this.boundaryEdges = config.boundaryEdges ?? []; // [{v1, v2, neighborParentId}]
+
+        // Biome blending (for sub-tiles near biome boundaries)
+        this.blendBiome = config.blendBiome ?? null;    // Biome to blend toward
+        this.blendFactor = config.blendFactor ?? 0;      // 0-1 blend amount
     }
 
     /**
@@ -146,7 +150,9 @@ export class Tile {
             maxZoom: this.maxZoom,
             detailGenerated: this.detailGenerated,
             childrenIds: this.childrenIds,
-            boundaryEdges: this.boundaryEdges
+            boundaryEdges: this.boundaryEdges,
+            blendBiome: this.blendBiome,
+            blendFactor: this.blendFactor
         };
     }
 

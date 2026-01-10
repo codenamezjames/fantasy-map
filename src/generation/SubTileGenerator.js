@@ -341,6 +341,7 @@ export class SubTileGenerator {
 
     /**
      * Determine child biome with boundary blending for smoother transitions
+     * Also sets blendBiome and blendFactor on the child for color interpolation
      */
     determineChildBiomeWithBlending(child, parent, neighborBiomes, rng) {
         // If no different-biome neighbors, use standard logic
@@ -352,8 +353,8 @@ export class SubTileGenerator {
         const parentBounds = getPolygonBounds(parent.vertices);
         const parentRadius = Math.max(parentBounds.width, parentBounds.height) / 2;
 
-        // Blend zone is the outer portion of the tile
-        const blendZoneRatio = 0.4; // 40% of tile radius is blend zone
+        // Blend zone extends across most of the tile for smooth gradients
+        const blendZoneRatio = 0.8; // 80% of tile radius participates in blending
         const blendDistance = parentRadius * blendZoneRatio;
 
         // Find closest different-biome neighbor edge
@@ -371,18 +372,23 @@ export class SubTileGenerator {
             }
         }
 
-        // If child is in blend zone, potentially use transitional biome
+        // Set color blending info for all children near boundary
         if (closestNeighbor && closestDist < blendDistance) {
+            // Blend factor: 0 at blendDistance, approaches 1 at the boundary edge
+            // Using smoothstep for natural gradient
+            const rawBlend = 1 - (closestDist / blendDistance);
+            const blendFactor = rawBlend * rawBlend * (3 - 2 * rawBlend); // smoothstep
+
+            // Store blend info for color rendering (cap at 60% for smooth transition)
+            child.blendBiome = closestNeighbor.biome;
+            child.blendFactor = blendFactor * 0.6;
+
+            // Optionally also change biome type for transitional zones
             const transitional = getTransitionalBiomes(parent.biome, closestNeighbor.biome);
-
             if (transitional && transitional.length > 0) {
-                // Probability of transition increases closer to boundary
-                const blendStrength = 1 - (closestDist / blendDistance);
-                const transitionChance = blendStrength * 0.7; // Max 70% chance at boundary
-
+                const transitionChance = blendFactor * 0.4;
                 if (rng.random() < transitionChance) {
-                    // Pick a transitional biome (weighted toward ones closer to parent)
-                    const idx = Math.floor(rng.random() * transitional.length * (1 - blendStrength * 0.5));
+                    const idx = Math.floor(rng.random() * transitional.length * (1 - blendFactor * 0.5));
                     return transitional[Math.min(idx, transitional.length - 1)];
                 }
             }

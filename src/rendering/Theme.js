@@ -25,8 +25,29 @@ const BIOME_COLORS = {
 };
 
 /**
+ * Interpolate between two HSL colors
+ */
+function lerpHSL(hsl1, hsl2, t) {
+    // Handle hue wrapping (take shortest path around color wheel)
+    let h1 = hsl1.h, h2 = hsl2.h;
+    const hDiff = h2 - h1;
+    if (Math.abs(hDiff) > 180) {
+        if (hDiff > 0) {
+            h1 += 360;
+        } else {
+            h2 += 360;
+        }
+    }
+    return {
+        h: (h1 + (h2 - h1) * t + 360) % 360,
+        s: hsl1.s + (hsl2.s - hsl1.s) * t,
+        l: hsl1.l + (hsl2.l - hsl1.l) * t
+    };
+}
+
+/**
  * Get biome-based tile color (default palette)
- * Applies elevation lightness shift and hillshading
+ * Applies elevation lightness shift, hillshading, and biome blending
  */
 function getBiomeHSL(tile, colors = BIOME_COLORS) {
     let base;
@@ -42,6 +63,12 @@ function getBiomeHSL(tile, colors = BIOME_COLORS) {
     } else {
         // Fallback to elevation-based
         base = getElevationHSL(tile);
+    }
+
+    // Apply biome color blending for smooth transitions at boundaries
+    if (tile.blendBiome && tile.blendFactor > 0 && colors[tile.blendBiome]) {
+        const blendTarget = colors[tile.blendBiome];
+        base = lerpHSL(base, blendTarget, tile.blendFactor);
     }
 
     // Elevation lightness shift: higher = lighter, lower = darker
