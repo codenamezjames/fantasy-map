@@ -755,7 +755,8 @@ class MapGenerator {
         if (!this.world) return;
 
         const viewport = camera.getViewport();
-        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+        // Use level-0 tiles only (rivers are stored on base tiles, not sub-tiles)
+        const tiles = this.world.getTilesAtLevel(0).filter(t => t.intersectsViewport(viewport));
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -856,7 +857,8 @@ class MapGenerator {
         if (!this.world) return;
 
         const viewport = camera.getViewport();
-        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+        // Use level-0 tiles only (roads are stored on base tiles, not sub-tiles)
+        const tiles = this.world.getTilesAtLevel(0).filter(t => t.intersectsViewport(viewport));
         const drawnEdges = new Set();
 
         const config = CONFIG.roads?.rendering || {};
