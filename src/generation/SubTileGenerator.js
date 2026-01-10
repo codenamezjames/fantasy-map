@@ -284,7 +284,7 @@ export class SubTileGenerator {
                 child.waterDepth = parent.waterDepth;
                 child.biome = parent.biome;
             } else {
-                // Determine biome with transition constraints and boundary blending
+                // Determine biome - boundary blending sets blendBiome/blendFactor for color transitions
                 child.biome = this.determineChildBiomeWithBlending(
                     child, parent, neighborBiomes, rng
                 );
@@ -353,8 +353,8 @@ export class SubTileGenerator {
         const parentBounds = getPolygonBounds(parent.vertices);
         const parentRadius = Math.max(parentBounds.width, parentBounds.height) / 2;
 
-        // Blend zone extends across most of the tile for smooth gradients
-        const blendZoneRatio = 0.8; // 80% of tile radius participates in blending
+        // Blend zone covers entire tile for strong gradients
+        const blendZoneRatio = 1; // 100% of tile radius participates in blending
         const blendDistance = parentRadius * blendZoneRatio;
 
         // Find closest different-biome neighbor edge
@@ -379,9 +379,9 @@ export class SubTileGenerator {
             const rawBlend = 1 - (closestDist / blendDistance);
             const blendFactor = rawBlend * rawBlend * (3 - 2 * rawBlend); // smoothstep
 
-            // Store blend info for color rendering (cap at 60% for smooth transition)
+            // Store blend info for color rendering (strong blending up to 85%)
             child.blendBiome = closestNeighbor.biome;
-            child.blendFactor = blendFactor * 0.6;
+            child.blendFactor = blendFactor * 0.85;
 
             // Optionally also change biome type for transitional zones
             const transitional = getTransitionalBiomes(parent.biome, closestNeighbor.biome);
@@ -400,20 +400,12 @@ export class SubTileGenerator {
 
     /**
      * Determine child's biome constrained to valid transitions
+     * Interior tiles strongly prefer parent biome to avoid isolated patches
      */
     determineChildBiome(child, parent) {
-        // Get valid transitions for parent biome
-        const validBiomes = BIOME_TRANSITIONS[parent.biome] || [parent.biome];
-
-        // Calculate what biome the child would naturally be
-        const calculatedBiome = this.calculateBiome(child);
-
-        // If calculated biome is valid transition, use it
-        if (validBiomes.includes(calculatedBiome)) {
-            return calculatedBiome;
-        }
-
-        // Otherwise use parent biome
+        // Most interior tiles should just inherit parent biome
+        // This prevents isolated "islands" of different biomes
+        // Biome variation should come from boundary blending, not random interior changes
         return parent.biome;
     }
 
