@@ -9,6 +9,7 @@ import { BiomeGenerator } from './generation/BiomeGenerator.js';
 import { WaterGenerator } from './generation/WaterGenerator.js';
 import { SubTileGenerator } from './generation/SubTileGenerator.js';
 import { TileLoadManager } from './generation/TileLoadManager.js';
+import { POIGenerator } from './generation/POIGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 
@@ -43,6 +44,10 @@ class MapGenerator {
         // Separate RNG for rivers so they can be regenerated independently
         this.riverRng = new SeededRandom(CONFIG.water.riverSeed);
         this.waterGenerator = new WaterGenerator(this.riverRng);
+
+        // Separate RNG for POIs
+        this.poiRng = new SeededRandom(CONFIG.pois?.seed || 'pois-1');
+        this.poiGenerator = new POIGenerator(this.poiRng);
 
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
@@ -99,7 +104,9 @@ class MapGenerator {
             onRender: (ctx, camera) => this.renderWorld(ctx, camera),
             getBackground: () => this.theme.getBackground(),
             getOverlayBackground: () => this.theme.getOverlayBackground(),
-            getOverlayText: () => this.theme.getOverlayText()
+            getOverlayText: () => this.theme.getOverlayText(),
+            onClick: (worldPos) => this.handleMapClick(worldPos),
+            onHover: (worldPos) => this.handleMapHover(worldPos)
         });
 
         // Handle window resize
@@ -178,6 +185,10 @@ class MapGenerator {
         // Generate water features (rivers and lakes)
         this.waterGenerator.generate(this.world);
 
+        // Generate POIs (settlements, dungeons, temples, etc.)
+        this.poiGenerator.generate(this.world);
+        console.log('POIs generated:', this.world.pois.size);
+
         // Set zoom thresholds from config
         this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
 
@@ -206,6 +217,9 @@ class MapGenerator {
 
         // Draw rivers
         this.drawRivers(ctx, camera);
+
+        // Draw POIs
+        this.drawPOIs(ctx, camera);
 
         // Draw grid overlay (optional, visible at higher zoom)
         if (camera.isVisibleAtZoom(30, 100)) {
@@ -248,6 +262,352 @@ class MapGenerator {
             ctx.lineWidth = 1 / camera.scale;
             ctx.stroke();
         }
+    }
+
+    /**
+     * Draw Points of Interest (settlements, dungeons, etc.)
+     */
+    drawPOIs(ctx, camera) {
+        if (!this.world) return;
+
+        const viewport = camera.getViewport();
+        const pois = this.world.getPOIsInViewport(viewport, camera.zoom);
+        const poiConfig = CONFIG.pois?.rendering || {};
+
+        for (const poi of pois) {
+            const [x, y] = poi.position;
+
+            // Determine rendering style based on zoom
+            if (camera.zoom < 0) {
+                // Very distant: small dot for major POIs only
+                if (['capital', 'city'].includes(poi.type)) {
+                    this.drawPOIDot(ctx, x, y, poi, camera, poiConfig);
+                }
+            } else if (camera.zoom < 30) {
+                // Distant: dots for all visible POIs
+                this.drawPOIDot(ctx, x, y, poi, camera, poiConfig);
+            } else if (camera.zoom < 60) {
+                // Medium: symbols
+                this.drawPOISymbol(ctx, x, y, poi, camera, poiConfig);
+            } else {
+                // Close: symbols with labels
+                this.drawPOISymbol(ctx, x, y, poi, camera, poiConfig);
+                this.drawPOILabel(ctx, x, y, poi, camera, poiConfig);
+            }
+        }
+    }
+
+    /**
+     * Draw a simple dot for distant POIs
+     */
+    drawPOIDot(ctx, x, y, poi, camera, config) {
+        const size = (config.dotSize || 3) / camera.scale;
+
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fillStyle = this.theme.getPOIColor(poi.type);
+        ctx.fill();
+        ctx.strokeStyle = this.theme.getPOIStrokeColor(poi.type);
+        ctx.lineWidth = 1 / camera.scale;
+        ctx.stroke();
+    }
+
+    /**
+     * Draw a symbol for medium-distance POIs
+     */
+    drawPOISymbol(ctx, x, y, poi, camera, config) {
+        const size = (config.symbolSize || 8) / camera.scale;
+        const fillColor = this.theme.getPOIColor(poi.type);
+        const strokeColor = this.theme.getPOIStrokeColor(poi.type);
+
+        ctx.fillStyle = fillColor;
+        ctx.strokeStyle = strokeColor;
+        ctx.lineWidth = 1.5 / camera.scale;
+
+        switch (poi.type) {
+            case 'capital':
+                // Star shape
+                this.drawStar(ctx, x, y, size, 5);
+                break;
+            case 'city':
+                // Square
+                ctx.fillRect(x - size / 2, y - size / 2, size, size);
+                ctx.strokeRect(x - size / 2, y - size / 2, size, size);
+                break;
+            case 'town':
+                // Circle
+                ctx.beginPath();
+                ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 'village':
+                // Small circle
+                ctx.beginPath();
+                ctx.arc(x, y, size / 3, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+                break;
+            case 'dungeon':
+                // Triangle pointing down
+                this.drawTriangle(ctx, x, y, size, true);
+                break;
+            case 'temple':
+                // Triangle pointing up
+                this.drawTriangle(ctx, x, y, size, false);
+                break;
+            case 'ruins':
+                // X mark
+                this.drawX(ctx, x, y, size);
+                break;
+            case 'port':
+                // Diamond
+                this.drawDiamond(ctx, x, y, size);
+                break;
+            default:
+                // Default circle
+                ctx.beginPath();
+                ctx.arc(x, y, size / 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+        }
+    }
+
+    /**
+     * Draw a star shape
+     */
+    drawStar(ctx, x, y, size, points) {
+        const outerRadius = size;
+        const innerRadius = size * 0.4;
+
+        ctx.beginPath();
+        for (let i = 0; i < points * 2; i++) {
+            const radius = i % 2 === 0 ? outerRadius : innerRadius;
+            const angle = (i * Math.PI) / points - Math.PI / 2;
+            const px = x + Math.cos(angle) * radius;
+            const py = y + Math.sin(angle) * radius;
+            if (i === 0) {
+                ctx.moveTo(px, py);
+            } else {
+                ctx.lineTo(px, py);
+            }
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    /**
+     * Draw a triangle
+     */
+    drawTriangle(ctx, x, y, size, pointDown) {
+        const h = size * 0.866; // height of equilateral triangle
+        const dir = pointDown ? 1 : -1;
+
+        ctx.beginPath();
+        ctx.moveTo(x, y + dir * h / 2);
+        ctx.lineTo(x - size / 2, y - dir * h / 2);
+        ctx.lineTo(x + size / 2, y - dir * h / 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    /**
+     * Draw an X mark
+     */
+    drawX(ctx, x, y, size) {
+        const half = size / 2;
+        ctx.beginPath();
+        ctx.moveTo(x - half, y - half);
+        ctx.lineTo(x + half, y + half);
+        ctx.moveTo(x + half, y - half);
+        ctx.lineTo(x - half, y + half);
+        ctx.stroke();
+    }
+
+    /**
+     * Draw a diamond shape
+     */
+    drawDiamond(ctx, x, y, size) {
+        const half = size / 2;
+        ctx.beginPath();
+        ctx.moveTo(x, y - half);
+        ctx.lineTo(x + half, y);
+        ctx.lineTo(x, y + half);
+        ctx.lineTo(x - half, y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
+
+    /**
+     * Draw POI label
+     */
+    drawPOILabel(ctx, x, y, poi, camera, config) {
+        const fontSize = Math.max(10, (config.labelOffset || 12) / camera.scale);
+        const offset = (config.symbolSize || 8) / camera.scale + 4 / camera.scale;
+
+        ctx.font = `${fontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+
+        const text = poi.name;
+        const metrics = ctx.measureText(text);
+        const padding = 2 / camera.scale;
+
+        // Draw label background
+        ctx.fillStyle = this.theme.getPOILabelBackground();
+        ctx.fillRect(
+            x - metrics.width / 2 - padding,
+            y + offset - padding,
+            metrics.width + padding * 2,
+            fontSize + padding * 2
+        );
+
+        // Draw label text
+        ctx.fillStyle = this.theme.getPOILabelColor();
+        ctx.fillText(text, x, y + offset);
+    }
+
+    /**
+     * Handle click on the map
+     * @param {Object} worldPos - World coordinates {x, y}
+     */
+    handleMapClick(worldPos) {
+        const poi = this.findPOIAtPosition(worldPos.x, worldPos.y);
+        if (poi) {
+            this.showPOIDialog(poi);
+        } else {
+            this.hidePOIDialog();
+        }
+    }
+
+    /**
+     * Handle hover on the map - returns true if over an interactive element
+     * @param {Object} worldPos - World coordinates {x, y}
+     * @returns {boolean} True if hovering over a POI
+     */
+    handleMapHover(worldPos) {
+        const poi = this.findPOIAtPosition(worldPos.x, worldPos.y);
+        return poi !== null;
+    }
+
+    /**
+     * Find a POI near the given world position
+     * @param {number} x - World X coordinate
+     * @param {number} y - World Y coordinate
+     * @returns {POI|null} The POI at that position, or null
+     */
+    findPOIAtPosition(x, y) {
+        if (!this.world) return null;
+
+        const camera = this.viewer.camera;
+        const poiConfig = CONFIG.pois?.rendering || {};
+
+        // Hit radius depends on zoom level and symbol size
+        const baseSize = poiConfig.symbolSize || 8;
+        const hitRadius = Math.max(15, baseSize * 2) / camera.scale;
+
+        // Get visible POIs
+        const viewport = camera.getViewport();
+        const pois = this.world.getPOIsInViewport(viewport, camera.zoom);
+
+        // Find closest POI within hit radius
+        let closestPOI = null;
+        let closestDist = hitRadius;
+
+        for (const poi of pois) {
+            const dist = poi.distanceTo(x, y);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestPOI = poi;
+            }
+        }
+
+        return closestPOI;
+    }
+
+    /**
+     * Show POI info dialog
+     * @param {POI} poi - The POI to display
+     */
+    showPOIDialog(poi) {
+        let dialog = document.getElementById('poi-dialog');
+        if (!dialog) {
+            dialog = this.createPOIDialog();
+        }
+
+        // Get tile info for biome
+        const tile = this.world.getTile(poi.tileId);
+        const biome = tile?.biome?.replaceAll('_', ' ') || 'Unknown';
+
+        // Format population
+        const population = poi.population > 0
+            ? poi.population.toLocaleString()
+            : 'Uninhabited';
+
+        // Format type with capital letter
+        const typeDisplay = poi.type.charAt(0).toUpperCase() + poi.type.slice(1);
+
+        // Update dialog content
+        dialog.querySelector('.poi-dialog-title').textContent = poi.name;
+        dialog.querySelector('.poi-dialog-type').textContent = typeDisplay;
+        dialog.querySelector('.poi-dialog-type').className = `poi-dialog-type poi-type-${poi.type}`;
+
+        const detailsHTML = `
+            <div class="poi-detail-row">
+                <span class="poi-detail-label">Population:</span>
+                <span class="poi-detail-value">${population}</span>
+            </div>
+            <div class="poi-detail-row">
+                <span class="poi-detail-label">Biome:</span>
+                <span class="poi-detail-value">${biome}</span>
+            </div>
+            <div class="poi-detail-row">
+                <span class="poi-detail-label">Size:</span>
+                <span class="poi-detail-value">${poi.size}</span>
+            </div>
+            ${poi.isCapital ? '<div class="poi-capital-badge">Capital City</div>' : ''}
+        `;
+        dialog.querySelector('.poi-dialog-details').innerHTML = detailsHTML;
+
+        dialog.classList.add('visible');
+    }
+
+    /**
+     * Hide POI info dialog
+     */
+    hidePOIDialog() {
+        const dialog = document.getElementById('poi-dialog');
+        if (dialog) {
+            dialog.classList.remove('visible');
+        }
+    }
+
+    /**
+     * Create the POI dialog element
+     */
+    createPOIDialog() {
+        const dialog = document.createElement('div');
+        dialog.id = 'poi-dialog';
+        dialog.className = 'poi-dialog';
+        dialog.innerHTML = `
+            <button class="poi-dialog-close" aria-label="Close">&times;</button>
+            <div class="poi-dialog-header">
+                <h2 class="poi-dialog-title">POI Name</h2>
+                <span class="poi-dialog-type">Type</span>
+            </div>
+            <div class="poi-dialog-details"></div>
+        `;
+
+        // Close button handler
+        dialog.querySelector('.poi-dialog-close').addEventListener('click', () => {
+            this.hidePOIDialog();
+        });
+
+        document.body.appendChild(dialog);
+        return dialog;
     }
 
     /**

@@ -49,6 +49,60 @@ export const CONFIG = {
         zoomThresholds: [0, 40, 60, 80]  // World at 0%, Area at 40%, City at 60%, Building at 80%
     },
 
+    // Points of Interest
+    pois: {
+        seed: 'pois-1',  // Separate seed for POI regeneration
+        counts: {
+            capitals: 5,
+            cities: 15,
+            towns: 40,
+            villages: 100,
+            dungeons: 20,
+            temples: 10,
+            ruins: 30,
+            ports: 15
+        },
+        minDistances: {
+            capital: 500,
+            city: 300,
+            town: 150,
+            village: 50,
+            dungeon: 200,
+            temple: 250,
+            ruins: 100,
+            port: 200
+        },
+        // Biome preferences for each POI type (higher = more likely)
+        biomePreferences: {
+            village: { temperate_grassland: 2, temperate_forest: 1.5, savanna: 1.2, default: 0.5 },
+            town: { temperate_grassland: 2, temperate_forest: 1.5, beach: 1.3, default: 0.6 },
+            city: { temperate_grassland: 2.5, beach: 1.5, default: 0.4 },
+            capital: { temperate_grassland: 2, temperate_forest: 1.5, default: 1 },
+            dungeon: { snow: 2, tundra: 1.5, taiga: 1.5, marsh: 1.3, default: 0.5 },
+            temple: { temperate_forest: 1.5, tropical_forest: 1.5, rainforest: 1.3, default: 1 },
+            ruins: { desert: 2, tundra: 1.5, savanna: 1.3, default: 0.8 },
+            port: { beach: 3, default: 0 }  // Ports require coastal tiles
+        },
+        // How many rings of neighboring tiles each POI type occupies
+        tileOccupation: {
+            capital: 3,  // Large footprint
+            city: 2,
+            town: 1,
+            port: 1,
+            village: 0,  // Single tile
+            dungeon: 0,
+            temple: 0,
+            ruins: 0
+        },
+        rendering: {
+            dotSize: 3,
+            symbolSize: 8,
+            iconSize: 16,
+            labelOffset: 12,
+            labelFont: '12px sans-serif'
+        }
+    },
+
     // Visual rendering
     rendering: {
         // Elevation lightness shift

@@ -301,6 +301,13 @@ export class SubTileGenerator {
 
             // Traversability inherits with slight variation
             child.traversability = parent.traversability;
+
+            // POI occupation inherits from parent
+            if (parent.poiId !== null) {
+                child.poiId = parent.poiId;
+                child.poiType = parent.poiType;
+                child.poiInfluence = parent.poiInfluence;
+            }
         }
 
         // Mark coastal children that touch water neighbors

@@ -25,6 +25,20 @@ const BIOME_COLORS = {
 };
 
 /**
+ * POI (Point of Interest) color palette
+ */
+const POI_COLORS = {
+    village:  { h: 30, s: 15, l: 55, stroke: { h: 30, s: 10, l: 35 } },   // Light gray-brown
+    town:     { h: 220, s: 8, l: 50, stroke: { h: 220, s: 5, l: 30 } },   // Blue-gray
+    city:     { h: 0, s: 0, l: 45, stroke: { h: 0, s: 0, l: 25 } },       // Gray
+    capital:  { h: 0, s: 0, l: 40, stroke: { h: 0, s: 0, l: 20 } },       // Dark gray
+    dungeon:  { h: 270, s: 50, l: 35, stroke: { h: 265, s: 40, l: 20 } }, // Purple
+    temple:   { h: 200, s: 60, l: 60, stroke: { h: 195, s: 50, l: 40 } }, // Light blue
+    ruins:    { h: 30, s: 20, l: 50, stroke: { h: 30, s: 15, l: 30 } },   // Dusty brown
+    port:     { h: 210, s: 15, l: 48, stroke: { h: 210, s: 10, l: 28 } }  // Steel blue-gray
+};
+
+/**
  * Interpolate between two HSL colors
  */
 function lerpHSL(hsl1, hsl2, t) {
@@ -69,6 +83,16 @@ function getBiomeHSL(tile, colors = BIOME_COLORS) {
     if (tile.blendBiome && tile.blendFactor > 0 && colors[tile.blendBiome]) {
         const blendTarget = colors[tile.blendBiome];
         base = lerpHSL(base, blendTarget, tile.blendFactor);
+    }
+
+    // Apply POI occupation color blending
+    if (tile.poiType && tile.poiInfluence > 0) {
+        const poiColor = POI_COLORS[tile.poiType];
+        if (poiColor) {
+            // Blend toward POI color based on influence (max 60% blend to keep terrain visible)
+            const blendAmount = tile.poiInfluence * 0.6;
+            base = lerpHSL(base, poiColor, blendAmount);
+        }
     }
 
     // Elevation lightness shift: higher = lighter, lower = darker
@@ -385,6 +409,43 @@ export class Theme {
      */
     getRiverHSL() {
         return this.current.oceanColor;
+    }
+
+    /**
+     * Get POI fill color
+     * @param {string} type - POI type (village, town, city, etc.)
+     * @returns {string} HSL color string
+     */
+    getPOIColor(type) {
+        const color = POI_COLORS[type] || POI_COLORS.village;
+        return `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
+    }
+
+    /**
+     * Get POI stroke color
+     * @param {string} type - POI type
+     * @returns {string} HSL color string
+     */
+    getPOIStrokeColor(type) {
+        const color = POI_COLORS[type] || POI_COLORS.village;
+        const stroke = color.stroke;
+        return `hsl(${stroke.h}, ${stroke.s}%, ${stroke.l}%)`;
+    }
+
+    /**
+     * Get POI label color
+     * @returns {string} Color for POI labels
+     */
+    getPOILabelColor() {
+        return this.current.overlayText;
+    }
+
+    /**
+     * Get POI label background
+     * @returns {string} Background color for POI labels
+     */
+    getPOILabelBackground() {
+        return this.current.overlayBackground;
     }
 
     /**

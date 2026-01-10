@@ -33,6 +33,11 @@ export class Tile {
         this.roadEdges = config.roadEdges ?? [];
         this.traversability = config.traversability ?? 1;
 
+        // POI occupation
+        this.poiId = config.poiId ?? null;           // ID of POI occupying this tile
+        this.poiType = config.poiType ?? null;       // Type of POI (village, city, etc.)
+        this.poiInfluence = config.poiInfluence ?? 0; // 0-1 how strongly POI affects tile color
+
         // Visibility (zoom percentage range)
         this.minZoom = config.minZoom ?? -50;
         this.maxZoom = config.maxZoom ?? 40;
@@ -152,7 +157,10 @@ export class Tile {
             childrenIds: this.childrenIds,
             boundaryEdges: this.boundaryEdges,
             blendBiome: this.blendBiome,
-            blendFactor: this.blendFactor
+            blendFactor: this.blendFactor,
+            poiId: this.poiId,
+            poiType: this.poiType,
+            poiInfluence: this.poiInfluence
         };
     }
 

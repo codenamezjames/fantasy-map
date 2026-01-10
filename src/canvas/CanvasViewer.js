@@ -36,6 +36,17 @@ export class CanvasViewer {
         this.getOverlayBackground = config.getOverlayBackground || (() => 'rgba(0, 0, 0, 0.5)');
         this.getOverlayText = config.getOverlayText || (() => '#fff');
 
+        // Click callback (set by MapGenerator for POI interaction)
+        this.onClick = config.onClick || null;
+
+        // Hover callback (set by MapGenerator for cursor changes)
+        this.onHover = config.onHover || null;
+
+        // Track drag distance to distinguish clicks from drags
+        this.dragStartX = 0;
+        this.dragStartY = 0;
+        this.clickThreshold = 5; // Max pixels moved to count as click
+
         // Animation frame throttling for smooth rendering
         this.needsRender = false;
         this.renderScheduled = false;
@@ -117,13 +128,27 @@ export class CanvasViewer {
             this.isDragging = true;
             this.lastMouseX = e.clientX;
             this.lastMouseY = e.clientY;
+            this.dragStartX = e.clientX;
+            this.dragStartY = e.clientY;
             this.stopInertia(); // Stop any ongoing inertia
             canvas.style.cursor = 'grabbing';
         });
 
-        // Mouse move - pan if dragging
+        // Mouse move - pan if dragging, or check hover
         canvas.addEventListener('mousemove', (e) => {
-            if (!this.isDragging) return;
+            const rect = canvas.getBoundingClientRect();
+            const screenX = e.clientX - rect.left;
+            const screenY = e.clientY - rect.top;
+
+            if (!this.isDragging) {
+                // Check for hover (only when not dragging)
+                if (this.onHover) {
+                    const worldPos = this.camera.screenToWorld(screenX, screenY);
+                    const isOverInteractive = this.onHover(worldPos);
+                    canvas.style.cursor = isOverInteractive ? 'pointer' : 'grab';
+                }
+                return;
+            }
 
             const dx = e.clientX - this.lastMouseX;
             const dy = e.clientY - this.lastMouseY;
@@ -140,10 +165,30 @@ export class CanvasViewer {
             this.scheduleRender();
         });
 
-        // Mouse up - end drag, start inertia
-        canvas.addEventListener('mouseup', () => {
+        // Mouse up - end drag, start inertia, or handle click
+        canvas.addEventListener('mouseup', (e) => {
+            const wasDragging = this.isDragging;
             this.isDragging = false;
             canvas.style.cursor = 'grab';
+
+            // Check if this was a click (not a drag)
+            const dragDistance = Math.hypot(
+                e.clientX - this.dragStartX,
+                e.clientY - this.dragStartY
+            );
+
+            if (wasDragging && dragDistance < this.clickThreshold) {
+                // This was a click, not a drag
+                if (this.onClick) {
+                    const rect = canvas.getBoundingClientRect();
+                    const screenX = e.clientX - rect.left;
+                    const screenY = e.clientY - rect.top;
+                    const worldPos = this.camera.screenToWorld(screenX, screenY);
+                    this.onClick(worldPos, { screenX, screenY });
+                }
+                return; // Don't start inertia for clicks
+            }
+
             // Start inertia if we have velocity
             if (Math.abs(this.velocityX) > this.minVelocity ||
                 Math.abs(this.velocityY) > this.minVelocity) {
