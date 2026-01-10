@@ -124,6 +124,37 @@ export const CONFIG = {
         borderOpacity: 0.7
     },
 
+    // Roads
+    roads: {
+        seed: 'roads-1',
+        costs: {
+            base: 1,
+            forest: 2,
+            hills: 3,
+            mountains: 8,
+            peaks: 20,
+            riverCrossing: 3,
+            existingRoadBonus: -0.5
+        },
+        connections: {
+            capitalToCapitals: true,
+            capitalToCities: 2,
+            cityToCities: 2,
+            cityToTowns: 2,
+            townToTowns: 2,
+            townToVillages: 3,
+            villageToTown: 1,
+            specialToSettlement: 1
+        },
+        rendering: {
+            majorWidth: 3,
+            minorWidth: 2,
+            pathWidth: 1,
+            color: { h: 35, s: 30, l: 40 },  // Brown/tan
+            opacity: 0.7
+        }
+    },
+
     // Visual rendering
     rendering: {
         // Elevation lightness shift

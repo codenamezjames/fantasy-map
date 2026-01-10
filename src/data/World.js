@@ -24,6 +24,9 @@ export class World {
 
         // Region storage
         this.regions = new Map();           // regionId -> region metadata
+
+        // Road storage
+        this.roads = new Map();             // roadId -> road metadata
     }
 
     /**
@@ -273,6 +276,33 @@ export class World {
         return [...this.regions.values()];
     }
 
+    // ========== Road Methods ==========
+
+    /**
+     * Add a road to the world
+     * @param {Object} road - Road metadata {id, type, fromPoiId, toPoiId, tileIds}
+     */
+    addRoad(road) {
+        this.roads.set(road.id, road);
+    }
+
+    /**
+     * Get a road by ID
+     * @param {number} id - Road ID
+     * @returns {Object|undefined} Road metadata
+     */
+    getRoad(id) {
+        return this.roads.get(id);
+    }
+
+    /**
+     * Get all roads
+     * @returns {Object[]} Array of road metadata objects
+     */
+    getAllRoads() {
+        return [...this.roads.values()];
+    }
+
     /**
      * Find tile containing a world position
      * @param {number} x - World X coordinate
@@ -321,6 +351,7 @@ export class World {
         this.poiSpatialIndex.clear();
         this.nextPoiId = 0;
         this.regions.clear();
+        this.roads.clear();
     }
 
     /**
@@ -334,7 +365,8 @@ export class World {
             tileCount: this.tileCount,
             tiles: this.getAllTiles().map(t => t.toJSON()),
             pois: this.getAllPOIs().map(p => p.toJSON()),
-            regions: this.getAllRegions()
+            regions: this.getAllRegions(),
+            roads: this.getAllRoads()
         };
     }
 
@@ -364,6 +396,13 @@ export class World {
         if (data.regions) {
             for (const region of data.regions) {
                 world.addRegion(region);
+            }
+        }
+
+        // Load roads if present
+        if (data.roads) {
+            for (const road of data.roads) {
+                world.addRoad(road);
             }
         }
 

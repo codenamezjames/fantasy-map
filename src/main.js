@@ -11,6 +11,7 @@ import { SubTileGenerator } from './generation/SubTileGenerator.js';
 import { TileLoadManager } from './generation/TileLoadManager.js';
 import { POIGenerator } from './generation/POIGenerator.js';
 import { RegionGenerator } from './generation/RegionGenerator.js';
+import { RoadGenerator } from './generation/RoadGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 
@@ -53,6 +54,10 @@ class MapGenerator {
         // Separate RNG for regions
         this.regionRng = new SeededRandom(CONFIG.regions?.seed || 'regions-1');
         this.regionGenerator = new RegionGenerator(this.regionRng);
+
+        // Separate RNG for roads
+        this.roadRng = new SeededRandom(CONFIG.roads?.seed || 'roads-1');
+        this.roadGenerator = new RoadGenerator(this.roadRng);
 
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
@@ -226,6 +231,9 @@ class MapGenerator {
         // Generate regions (grow from capitals)
         this.regionGenerator.generate(this.world);
 
+        // Generate roads (connect POIs with pathfinding)
+        this.roadGenerator.generate(this.world);
+
         // Set zoom thresholds from config
         this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
 
@@ -254,6 +262,9 @@ class MapGenerator {
 
         // Draw rivers
         this.drawRivers(ctx, camera);
+
+        // Draw roads
+        this.drawRoads(ctx, camera);
 
         // Draw region borders and selection (if enabled)
         if (this.showRegions) {
@@ -836,6 +847,90 @@ class MapGenerator {
             ctx.lineTo(seg.to[0], seg.to[1]);
             ctx.stroke();
         }
+    }
+
+    /**
+     * Draw roads connecting POIs
+     */
+    drawRoads(ctx, camera) {
+        if (!this.world) return;
+
+        const viewport = camera.getViewport();
+        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+        const drawnEdges = new Set();
+
+        const config = CONFIG.roads?.rendering || {};
+        const color = config.color || { h: 35, s: 30, l: 40 };
+        const opacity = config.opacity || 0.7;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Group road edges by type for batch rendering
+        const roadSegments = { major: [], minor: [], path: [] };
+
+        for (const tile of tiles) {
+            if (!tile.roadEdges || tile.roadEdges.length === 0) continue;
+
+            for (const neighborId of tile.roadEdges) {
+                const edgeKey = tile.id < neighborId
+                    ? `${tile.id}-${neighborId}`
+                    : `${neighborId}-${tile.id}`;
+                if (drawnEdges.has(edgeKey)) continue;
+                drawnEdges.add(edgeKey);
+
+                const neighbor = this.world.getTile(neighborId);
+                if (!neighbor) continue;
+
+                // Determine road type from road metadata
+                const roadType = this.getRoadTypeForEdge(tile.id, neighborId);
+
+                roadSegments[roadType].push({
+                    from: tile.center,
+                    to: neighbor.center
+                });
+            }
+        }
+
+        // Draw paths first (bottom), then minor, then major (top)
+        const widths = {
+            path: config.pathWidth || 1,
+            minor: config.minorWidth || 2,
+            major: config.majorWidth || 3
+        };
+
+        for (const type of ['path', 'minor', 'major']) {
+            if (roadSegments[type].length === 0) continue;
+
+            ctx.strokeStyle = `hsla(${color.h}, ${color.s}%, ${color.l}%, ${opacity})`;
+            ctx.lineWidth = widths[type] / camera.scale;
+
+            ctx.beginPath();
+            for (const seg of roadSegments[type]) {
+                ctx.moveTo(seg.from[0], seg.from[1]);
+                ctx.lineTo(seg.to[0], seg.to[1]);
+            }
+            ctx.stroke();
+        }
+    }
+
+    /**
+     * Get road type for a tile edge by checking road metadata
+     */
+    getRoadTypeForEdge(tileId1, tileId2) {
+        if (!this.world) return 'path';
+
+        // Check roads to find type
+        for (const road of this.world.getAllRoads()) {
+            const tiles = road.tileIds;
+            for (let i = 0; i < tiles.length - 1; i++) {
+                if ((tiles[i] === tileId1 && tiles[i + 1] === tileId2) ||
+                    (tiles[i] === tileId2 && tiles[i + 1] === tileId1)) {
+                    return road.type;
+                }
+            }
+        }
+        return 'path';  // Default
     }
 
     /**
