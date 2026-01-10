@@ -38,6 +38,17 @@ export const CONFIG = {
         maxHigherNeighbors: 3     // Max neighbors that can be higher (higher = more sources)
     },
 
+    // Sub-tile generation (hierarchical zoom)
+    subtiles: {
+        baseCount: 12,              // Base sub-tiles per parent
+        elevationVariation: 0.1,    // Max elevation deviation from parent
+        moistureVariation: 0.1,     // Max moisture deviation from parent
+        maxLoadedParents: 50,       // Max parents with loaded children (memory limit)
+        minParentArea: 10,          // Minimum parent tile area to subdivide
+        // Zoom thresholds for each level (zoom % where level starts)
+        zoomThresholds: [0, 40, 60, 80]  // World at 0%, Area at 40%, City at 60%, Building at 80%
+    },
+
     // Visual rendering
     rendering: {
         // Elevation lightness shift

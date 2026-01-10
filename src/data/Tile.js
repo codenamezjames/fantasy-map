@@ -39,6 +39,31 @@ export class Tile {
 
         // Hierarchical detail
         this.detailGenerated = config.detailGenerated ?? false;
+        this.childrenIds = config.childrenIds ?? [];
+        this.boundaryEdges = config.boundaryEdges ?? []; // [{v1, v2, neighborParentId}]
+    }
+
+    /**
+     * Get deterministic seed for generating children of this tile
+     * @param {string} worldSeed - The world's base seed
+     * @returns {string} Seed for child generation
+     */
+    getLocalSeed(worldSeed) {
+        return `${worldSeed}-${this.id}-z${this.zoomLevel + 1}`;
+    }
+
+    /**
+     * Check if this tile has generated children
+     */
+    hasChildren() {
+        return this.childrenIds.length > 0;
+    }
+
+    /**
+     * Check if this tile is at maximum detail level
+     */
+    isAtMaxDetail() {
+        return this.zoomLevel >= 3; // Building level
     }
 
     /**
@@ -119,7 +144,9 @@ export class Tile {
             traversability: this.traversability,
             minZoom: this.minZoom,
             maxZoom: this.maxZoom,
-            detailGenerated: this.detailGenerated
+            detailGenerated: this.detailGenerated,
+            childrenIds: this.childrenIds,
+            boundaryEdges: this.boundaryEdges
         };
     }
 

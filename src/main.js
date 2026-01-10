@@ -7,6 +7,8 @@ import { TemperatureGenerator } from './generation/TemperatureGenerator.js';
 import { MoistureGenerator } from './generation/MoistureGenerator.js';
 import { BiomeGenerator } from './generation/BiomeGenerator.js';
 import { WaterGenerator } from './generation/WaterGenerator.js';
+import { SubTileGenerator } from './generation/SubTileGenerator.js';
+import { TileLoadManager } from './generation/TileLoadManager.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 
@@ -42,6 +44,10 @@ class MapGenerator {
         this.riverRng = new SeededRandom(CONFIG.water.riverSeed);
         this.waterGenerator = new WaterGenerator(this.riverRng);
 
+        // Sub-tile generation for hierarchical zoom
+        this.subTileGenerator = new SubTileGenerator(this.noise);
+        this.tileLoadManager = null; // Created after world generation
+
         // Theme - load from localStorage or default to 'dark'
         const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
         this.theme = new Theme(savedTheme);
@@ -64,6 +70,14 @@ class MapGenerator {
      */
     getThemes() {
         return Theme.getThemeList();
+    }
+
+    /**
+     * Get sub-tile loading statistics (for debugging)
+     */
+    getSubTileStats() {
+        if (!this.tileLoadManager) return null;
+        return this.tileLoadManager.getStats();
     }
 
     init() {
@@ -163,6 +177,16 @@ class MapGenerator {
 
         // Generate water features (rivers and lakes)
         this.waterGenerator.generate(this.world);
+
+        // Set zoom thresholds from config
+        this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
+
+        // Create tile load manager for hierarchical sub-tiles
+        this.tileLoadManager = new TileLoadManager(
+            this.world,
+            this.subTileGenerator,
+            { seed: this.config.seed }
+        );
     }
 
     /**
@@ -170,6 +194,12 @@ class MapGenerator {
      */
     renderWorld(ctx, camera) {
         const { worldWidth, worldHeight } = this.config;
+
+        // Update sub-tile loading based on viewport and zoom
+        if (this.tileLoadManager) {
+            const viewport = camera.getViewport();
+            this.tileLoadManager.update(viewport, camera.zoom);
+        }
 
         // Draw tiles
         this.drawTiles(ctx, camera);
