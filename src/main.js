@@ -3,6 +3,10 @@ import { NoiseGenerator } from './utils/noise.js';
 import { CanvasViewer } from './canvas/CanvasViewer.js';
 import { VoronoiGenerator } from './generation/VoronoiGenerator.js';
 import { ElevationGenerator } from './generation/ElevationGenerator.js';
+import { TemperatureGenerator } from './generation/TemperatureGenerator.js';
+import { MoistureGenerator } from './generation/MoistureGenerator.js';
+import { BiomeGenerator } from './generation/BiomeGenerator.js';
+import { WaterGenerator } from './generation/WaterGenerator.js';
 import { Theme } from './rendering/Theme.js';
 
 /**
@@ -28,6 +32,10 @@ class MapGenerator {
         this.world = null;
         this.voronoiGenerator = new VoronoiGenerator(this.rng);
         this.elevationGenerator = new ElevationGenerator(this.noise);
+        this.temperatureGenerator = new TemperatureGenerator(this.noise);
+        this.moistureGenerator = new MoistureGenerator(this.noise);
+        this.biomeGenerator = new BiomeGenerator();
+        this.waterGenerator = new WaterGenerator();
 
         // Theme
         this.theme = new Theme('dark');
@@ -110,6 +118,16 @@ class MapGenerator {
 
         // Generate elevation
         this.elevationGenerator.generate(this.world);
+
+        // Generate temperature and moisture
+        this.temperatureGenerator.generate(this.world);
+        this.moistureGenerator.generate(this.world);
+
+        // Generate biomes
+        this.biomeGenerator.generate(this.world);
+
+        // Generate water features (rivers and lakes)
+        this.waterGenerator.generate(this.world);
     }
 
     /**
@@ -120,6 +138,9 @@ class MapGenerator {
 
         // Draw tiles
         this.drawTiles(ctx, camera);
+
+        // Draw rivers
+        this.drawRivers(ctx, camera);
 
         // Draw grid overlay (optional, visible at higher zoom)
         if (camera.isVisibleAtZoom(30, 100)) {
@@ -162,6 +183,64 @@ class MapGenerator {
             ctx.lineWidth = 1 / camera.scale;
             ctx.stroke();
         }
+    }
+
+    /**
+     * Draw rivers along tile edges
+     */
+    drawRivers(ctx, camera) {
+        if (!this.world) return;
+
+        const viewport = camera.getViewport();
+        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
+
+        ctx.strokeStyle = 'hsl(200, 70%, 45%)';
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        for (const tile of tiles) {
+            if (tile.riverEdges.length === 0) continue;
+
+            for (const neighborId of tile.riverEdges) {
+                // Only draw each edge once (lower id draws)
+                if (neighborId > tile.id) continue;
+
+                const neighbor = this.world.getTile(neighborId);
+                if (!neighbor) continue;
+
+                // Find shared edge vertices between tiles
+                const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                if (!sharedEdge) continue;
+
+                // River width based on flow accumulation
+                const flow = Math.min(tile.riverFlow || 1, 10);
+                ctx.lineWidth = (2 + flow * 0.8) / camera.scale;
+
+                ctx.beginPath();
+                ctx.moveTo(sharedEdge[0][0], sharedEdge[0][1]);
+                ctx.lineTo(sharedEdge[1][0], sharedEdge[1][1]);
+                ctx.stroke();
+            }
+        }
+    }
+
+    /**
+     * Find the shared edge between two tile polygons
+     */
+    findSharedEdge(verticesA, verticesB) {
+        const shared = [];
+        const epsilon = 0.001;
+
+        for (const vA of verticesA) {
+            for (const vB of verticesB) {
+                if (Math.abs(vA[0] - vB[0]) < epsilon && Math.abs(vA[1] - vB[1]) < epsilon) {
+                    shared.push(vA);
+                    break;
+                }
+            }
+        }
+
+        return shared.length >= 2 ? [shared[0], shared[1]] : null;
     }
 
     /**

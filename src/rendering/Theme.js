@@ -3,22 +3,56 @@
  */
 
 /**
- * Get elevation-based tile color for terrain themes
+ * Default biome color palette
+ */
+const BIOME_COLORS = {
+    ocean:              { h: 210, s: 60, l: 25 },
+    lake:               { h: 200, s: 50, l: 40 },
+    snow:               { h: 200, s: 10, l: 90 },
+    tundra:             { h: 180, s: 20, l: 45 },
+    taiga:              { h: 150, s: 35, l: 30 },
+    temperate_forest:   { h: 120, s: 45, l: 28 },
+    temperate_grassland:{ h: 90, s: 50, l: 40 },
+    shrubland:          { h: 60, s: 40, l: 35 },
+    desert:             { h: 45, s: 50, l: 55 },
+    savanna:            { h: 50, s: 55, l: 45 },
+    tropical_forest:    { h: 130, s: 55, l: 25 },
+    rainforest:         { h: 140, s: 60, l: 20 },
+    beach:              { h: 50, s: 40, l: 65 },
+    marsh:              { h: 100, s: 40, l: 30 }
+};
+
+/**
+ * Get biome-based tile color (default palette)
+ */
+function getBiomeHSL(tile, colors = BIOME_COLORS) {
+    if (tile.isWater) {
+        const depth = Math.min(1, tile.waterDepth * 3);
+        const base = colors.ocean || BIOME_COLORS.ocean;
+        return { h: base.h, s: base.s, l: base.l - depth * 10 };
+    }
+    if (tile.biome && colors[tile.biome]) {
+        return colors[tile.biome];
+    }
+    // Fallback to elevation-based
+    return getElevationHSL(tile);
+}
+
+/**
+ * Get elevation-based tile color (fallback)
  */
 function getElevationHSL(tile) {
     if (tile.isWater) {
-        // Water: blue, darker = deeper
         const depth = Math.min(1, tile.waterDepth * 3);
         return { h: 210, s: 60, l: 20 + (1 - depth) * 15 };
     }
 
-    // Land based on elevation
     const e = tile.elevation;
-    if (e > 0.8) return { h: 0, s: 0, l: 90 };        // Snow peaks
-    if (e > 0.65) return { h: 30, s: 25, l: 45 };     // Mountain rock
-    if (e > 0.5) return { h: 80, s: 35, l: 35 };      // Hills
-    if (e > 0.4) return { h: 100, s: 40, l: 32 };     // Highlands
-    return { h: 120, s: 45, l: 28 };                   // Lowlands
+    if (e > 0.8) return { h: 0, s: 0, l: 90 };
+    if (e > 0.65) return { h: 30, s: 25, l: 45 };
+    if (e > 0.5) return { h: 80, s: 35, l: 35 };
+    if (e > 0.4) return { h: 100, s: 40, l: 32 };
+    return { h: 120, s: 45, l: 28 };
 }
 
 // Preset theme definitions
@@ -32,7 +66,7 @@ const THEMES = {
         borderColor: '#4a9eff',
         overlayBackground: 'rgba(0, 0, 0, 0.5)',
         overlayText: '#fff',
-        getTileHSL: getElevationHSL
+        getTileHSL: (tile) => getBiomeHSL(tile)
     },
 
     sepia: {
@@ -44,18 +78,22 @@ const THEMES = {
         borderColor: '#8b7355',
         overlayBackground: 'rgba(30, 20, 10, 0.7)',
         overlayText: '#d4c4a8',
-        getTileHSL: (tile) => {
-            if (tile.isWater) {
-                const depth = Math.min(1, tile.waterDepth * 3);
-                return { h: 30, s: 25, l: 15 + (1 - depth) * 10 };
-            }
-            const e = tile.elevation;
-            if (e > 0.8) return { h: 35, s: 15, l: 65 };
-            if (e > 0.65) return { h: 30, s: 25, l: 45 };
-            if (e > 0.5) return { h: 35, s: 30, l: 35 };
-            if (e > 0.4) return { h: 40, s: 35, l: 30 };
-            return { h: 45, s: 30, l: 25 };
-        }
+        getTileHSL: (tile) => getBiomeHSL(tile, {
+            ocean:              { h: 30, s: 25, l: 18 },
+            lake:               { h: 32, s: 30, l: 28 },
+            snow:               { h: 35, s: 15, l: 65 },
+            tundra:             { h: 35, s: 20, l: 40 },
+            taiga:              { h: 40, s: 30, l: 30 },
+            temperate_forest:   { h: 45, s: 35, l: 28 },
+            temperate_grassland:{ h: 40, s: 35, l: 35 },
+            shrubland:          { h: 35, s: 30, l: 32 },
+            desert:             { h: 35, s: 40, l: 45 },
+            savanna:            { h: 38, s: 38, l: 38 },
+            tropical_forest:    { h: 45, s: 40, l: 25 },
+            rainforest:         { h: 48, s: 45, l: 22 },
+            beach:              { h: 35, s: 30, l: 50 },
+            marsh:              { h: 42, s: 30, l: 28 }
+        })
     },
 
     parchment: {
@@ -67,18 +105,22 @@ const THEMES = {
         borderColor: '#8b7355',
         overlayBackground: 'rgba(139, 115, 85, 0.8)',
         overlayText: '#3d2914',
-        getTileHSL: (tile) => {
-            if (tile.isWater) {
-                const depth = Math.min(1, tile.waterDepth * 3);
-                return { h: 200, s: 20, l: 60 + (1 - depth) * 15 };
-            }
-            const e = tile.elevation;
-            if (e > 0.8) return { h: 35, s: 10, l: 90 };
-            if (e > 0.65) return { h: 30, s: 20, l: 70 };
-            if (e > 0.5) return { h: 80, s: 25, l: 65 };
-            if (e > 0.4) return { h: 90, s: 30, l: 60 };
-            return { h: 100, s: 35, l: 55 };
-        }
+        getTileHSL: (tile) => getBiomeHSL(tile, {
+            ocean:              { h: 200, s: 20, l: 65 },
+            lake:               { h: 195, s: 25, l: 55 },
+            snow:               { h: 35, s: 10, l: 90 },
+            tundra:             { h: 180, s: 15, l: 70 },
+            taiga:              { h: 150, s: 25, l: 55 },
+            temperate_forest:   { h: 100, s: 30, l: 50 },
+            temperate_grassland:{ h: 80, s: 35, l: 60 },
+            shrubland:          { h: 55, s: 30, l: 55 },
+            desert:             { h: 40, s: 35, l: 70 },
+            savanna:            { h: 45, s: 40, l: 62 },
+            tropical_forest:    { h: 110, s: 35, l: 45 },
+            rainforest:         { h: 120, s: 40, l: 40 },
+            beach:              { h: 45, s: 30, l: 75 },
+            marsh:              { h: 90, s: 25, l: 52 }
+        })
     },
 
     dark: {
@@ -90,18 +132,22 @@ const THEMES = {
         borderColor: '#333',
         overlayBackground: 'rgba(0, 0, 0, 0.8)',
         overlayText: '#888',
-        getTileHSL: (tile) => {
-            if (tile.isWater) {
-                const depth = Math.min(1, tile.waterDepth * 3);
-                return { h: 210, s: 30, l: 8 + (1 - depth) * 8 };
-            }
-            const e = tile.elevation;
-            if (e > 0.8) return { h: 0, s: 0, l: 50 };
-            if (e > 0.65) return { h: 30, s: 15, l: 25 };
-            if (e > 0.5) return { h: 80, s: 20, l: 18 };
-            if (e > 0.4) return { h: 100, s: 25, l: 15 };
-            return { h: 120, s: 25, l: 12 };
-        }
+        getTileHSL: (tile) => getBiomeHSL(tile, {
+            ocean:              { h: 210, s: 30, l: 12 },
+            lake:               { h: 200, s: 35, l: 22 },
+            snow:               { h: 200, s: 5, l: 50 },
+            tundra:             { h: 180, s: 15, l: 25 },
+            taiga:              { h: 150, s: 25, l: 18 },
+            temperate_forest:   { h: 120, s: 25, l: 15 },
+            temperate_grassland:{ h: 90, s: 30, l: 22 },
+            shrubland:          { h: 60, s: 25, l: 20 },
+            desert:             { h: 45, s: 30, l: 30 },
+            savanna:            { h: 50, s: 35, l: 25 },
+            tropical_forest:    { h: 130, s: 35, l: 14 },
+            rainforest:         { h: 140, s: 40, l: 12 },
+            beach:              { h: 50, s: 25, l: 35 },
+            marsh:              { h: 100, s: 25, l: 18 }
+        })
     },
 
     ocean: {
@@ -113,18 +159,22 @@ const THEMES = {
         borderColor: '#2a5a8a',
         overlayBackground: 'rgba(10, 22, 40, 0.8)',
         overlayText: '#8ac4ff',
-        getTileHSL: (tile) => {
-            if (tile.isWater) {
-                const depth = Math.min(1, tile.waterDepth * 3);
-                return { h: 210, s: 70, l: 15 + (1 - depth) * 20 };
-            }
-            const e = tile.elevation;
-            if (e > 0.8) return { h: 200, s: 10, l: 70 };
-            if (e > 0.65) return { h: 190, s: 30, l: 40 };
-            if (e > 0.5) return { h: 170, s: 40, l: 30 };
-            if (e > 0.4) return { h: 160, s: 45, l: 25 };
-            return { h: 150, s: 50, l: 22 };
-        }
+        getTileHSL: (tile) => getBiomeHSL(tile, {
+            ocean:              { h: 210, s: 70, l: 20 },
+            lake:               { h: 200, s: 60, l: 35 },
+            snow:               { h: 200, s: 10, l: 70 },
+            tundra:             { h: 190, s: 30, l: 45 },
+            taiga:              { h: 170, s: 40, l: 30 },
+            temperate_forest:   { h: 160, s: 45, l: 28 },
+            temperate_grassland:{ h: 150, s: 45, l: 35 },
+            shrubland:          { h: 140, s: 35, l: 32 },
+            desert:             { h: 180, s: 25, l: 50 },
+            savanna:            { h: 165, s: 35, l: 40 },
+            tropical_forest:    { h: 155, s: 50, l: 25 },
+            rainforest:         { h: 150, s: 55, l: 22 },
+            beach:              { h: 185, s: 30, l: 55 },
+            marsh:              { h: 170, s: 40, l: 30 }
+        })
     },
 
     forest: {
@@ -136,18 +186,22 @@ const THEMES = {
         borderColor: '#3a5a2a',
         overlayBackground: 'rgba(13, 26, 13, 0.8)',
         overlayText: '#a8d48a',
-        getTileHSL: (tile) => {
-            if (tile.isWater) {
-                const depth = Math.min(1, tile.waterDepth * 3);
-                return { h: 180, s: 40, l: 15 + (1 - depth) * 10 };
-            }
-            const e = tile.elevation;
-            if (e > 0.8) return { h: 100, s: 10, l: 70 };
-            if (e > 0.65) return { h: 60, s: 25, l: 35 };
-            if (e > 0.5) return { h: 90, s: 45, l: 28 };
-            if (e > 0.4) return { h: 110, s: 50, l: 22 };
-            return { h: 130, s: 55, l: 18 };
-        }
+        getTileHSL: (tile) => getBiomeHSL(tile, {
+            ocean:              { h: 180, s: 40, l: 18 },
+            lake:               { h: 175, s: 45, l: 28 },
+            snow:               { h: 100, s: 10, l: 70 },
+            tundra:             { h: 120, s: 20, l: 40 },
+            taiga:              { h: 140, s: 45, l: 25 },
+            temperate_forest:   { h: 120, s: 55, l: 22 },
+            temperate_grassland:{ h: 100, s: 50, l: 32 },
+            shrubland:          { h: 80, s: 40, l: 30 },
+            desert:             { h: 60, s: 35, l: 45 },
+            savanna:            { h: 70, s: 45, l: 38 },
+            tropical_forest:    { h: 130, s: 60, l: 20 },
+            rainforest:         { h: 135, s: 65, l: 16 },
+            beach:              { h: 65, s: 35, l: 50 },
+            marsh:              { h: 110, s: 45, l: 25 }
+        })
     }
 };
 
