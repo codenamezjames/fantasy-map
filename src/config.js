@@ -9,7 +9,7 @@ export const CONFIG = {
     world: {
         width: 2000,
         height: 2000,
-        tileCount: 30000,
+        tileCount: 20000,
         relaxationIterations: 2,
         densityContrast: 3,      // Land tiles are this many times denser than ocean (1 = uniform)
         // Biome-based density multipliers (higher = more tiles/smaller cells)

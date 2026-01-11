@@ -338,27 +338,32 @@ class MapGenerator {
         const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
 
         for (const tile of tiles) {
-            // Draw cell polygon
-            ctx.beginPath();
             const vertices = tile.vertices;
             if (vertices.length < 3) continue;
 
-            ctx.moveTo(vertices[0][0], vertices[0][1]);
-            for (let i = 1; i < vertices.length; i++) {
-                ctx.lineTo(vertices[i][0], vertices[i][1]);
-            }
-            ctx.closePath();
-
-            // Fill with gradient or solid color
             if (this.showGradientBlend) {
-                ctx.fillStyle = this.getTileGradient(ctx, tile);
+                // Draw with directional gradients toward each neighbor
+                this.drawTileWithGradient(ctx, tile);
             } else {
+                // Draw solid color
+                ctx.beginPath();
+                ctx.moveTo(vertices[0][0], vertices[0][1]);
+                for (let i = 1; i < vertices.length; i++) {
+                    ctx.lineTo(vertices[i][0], vertices[i][1]);
+                }
+                ctx.closePath();
                 ctx.fillStyle = this.theme.getTileColor(tile);
+                ctx.fill();
             }
-            ctx.fill();
 
             // Stroke outline (if enabled)
             if (this.showTileBorders) {
+                ctx.beginPath();
+                ctx.moveTo(vertices[0][0], vertices[0][1]);
+                for (let i = 1; i < vertices.length; i++) {
+                    ctx.lineTo(vertices[i][0], vertices[i][1]);
+                }
+                ctx.closePath();
                 ctx.strokeStyle = this.theme.getTileStroke();
                 ctx.lineWidth = 1 / camera.scale;
                 ctx.stroke();
@@ -367,60 +372,105 @@ class MapGenerator {
     }
 
     /**
-     * Create a radial gradient for a tile that blends toward neighbor colors
+     * Draw a tile with directional gradients blending toward each neighbor
      */
-    getTileGradient(ctx, tile) {
+    drawTileWithGradient(ctx, tile) {
         const [cx, cy] = tile.center;
+        const vertices = tile.vertices;
         const tileHSL = this.theme.getTileHSL(tile);
+        const tileColor = `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`;
 
-        // Calculate tile radius (distance to farthest vertex)
-        let maxDist = 0;
-        for (const v of tile.vertices) {
-            const dist = Math.hypot(v[0] - cx, v[1] - cy);
-            if (dist > maxDist) maxDist = dist;
-        }
+        // Build edge-to-neighbor map
+        const edgeNeighbors = this.getEdgeNeighborMap(tile);
 
-        // Calculate average neighbor color
-        let avgH = 0, avgS = 0, avgL = 0, count = 0;
-        for (const neighborId of tile.neighbors) {
-            const neighbor = this.world.getTile(neighborId);
+        // Draw each triangle segment from center to edge
+        for (let i = 0; i < vertices.length; i++) {
+            const v1 = vertices[i];
+            const v2 = vertices[(i + 1) % vertices.length];
+
+            // Find which neighbor shares this edge
+            const edgeKey = this.makeEdgeKey(v1, v2);
+            const neighborId = edgeNeighbors.get(edgeKey);
+            const neighbor = neighborId !== undefined ? this.world.getTile(neighborId) : null;
+
+            // Calculate edge midpoint for gradient direction
+            const edgeMidX = (v1[0] + v2[0]) / 2;
+            const edgeMidY = (v1[1] + v2[1]) / 2;
+
+            // Create linear gradient from center toward edge midpoint
+            const gradient = ctx.createLinearGradient(cx, cy, edgeMidX, edgeMidY);
+            gradient.addColorStop(0, tileColor);
+            gradient.addColorStop(0.4, tileColor);
+
             if (neighbor) {
                 const nHSL = this.theme.getTileHSL(neighbor);
-                // Handle hue wrapping for averaging
-                let hDiff = nHSL.h - tileHSL.h;
-                if (hDiff > 180) hDiff -= 360;
-                if (hDiff < -180) hDiff += 360;
-                avgH += tileHSL.h + hDiff;
-                avgS += nHSL.s;
-                avgL += nHSL.l;
-                count++;
+                // Blend 50% toward neighbor at edge
+                const blendH = this.lerpHue(tileHSL.h, nHSL.h, 0.5);
+                const blendS = tileHSL.s * 0.5 + nHSL.s * 0.5;
+                const blendL = tileHSL.l * 0.5 + nHSL.l * 0.5;
+                gradient.addColorStop(1, `hsl(${blendH}, ${blendS}%, ${blendL}%)`);
+            } else {
+                gradient.addColorStop(1, tileColor);
+            }
+
+            // Draw triangle: center -> v1 -> v2
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(v1[0], v1[1]);
+            ctx.lineTo(v2[0], v2[1]);
+            ctx.closePath();
+            ctx.fillStyle = gradient;
+            ctx.fill();
+        }
+    }
+
+    /**
+     * Build a map of edge keys to neighbor tile IDs
+     */
+    getEdgeNeighborMap(tile) {
+        const edgeNeighbors = new Map();
+
+        for (const neighborId of tile.neighbors) {
+            const neighbor = this.world.getTile(neighborId);
+            if (!neighbor) continue;
+
+            // Find shared vertices between tile and neighbor
+            const sharedVerts = [];
+            for (const v1 of tile.vertices) {
+                for (const v2 of neighbor.vertices) {
+                    if (Math.abs(v1[0] - v2[0]) < 0.01 && Math.abs(v1[1] - v2[1]) < 0.01) {
+                        sharedVerts.push(v1);
+                        break;
+                    }
+                }
+            }
+
+            if (sharedVerts.length >= 2) {
+                const edgeKey = this.makeEdgeKey(sharedVerts[0], sharedVerts[1]);
+                edgeNeighbors.set(edgeKey, neighborId);
             }
         }
 
-        // Create gradient
-        const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, maxDist);
+        return edgeNeighbors;
+    }
 
-        // Inner: tile's own color
-        gradient.addColorStop(0, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
-        gradient.addColorStop(0.5, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
+    /**
+     * Create a consistent key for an edge (vertex pair)
+     */
+    makeEdgeKey(v1, v2) {
+        const k1 = `${v1[0].toFixed(2)},${v1[1].toFixed(2)}`;
+        const k2 = `${v2[0].toFixed(2)},${v2[1].toFixed(2)}`;
+        return k1 < k2 ? `${k1}-${k2}` : `${k2}-${k1}`;
+    }
 
-        // Outer: blend toward neighbor average (if we have neighbors)
-        if (count > 0) {
-            avgH = ((avgH / count) + 360) % 360;
-            avgS /= count;
-            avgL /= count;
-
-            // Blend 40% toward neighbor average at edges
-            const blendH = (tileHSL.h * 0.6 + avgH * 0.4 + 360) % 360;
-            const blendS = tileHSL.s * 0.6 + avgS * 0.4;
-            const blendL = tileHSL.l * 0.6 + avgL * 0.4;
-
-            gradient.addColorStop(1, `hsl(${blendH}, ${blendS}%, ${blendL}%)`);
-        } else {
-            gradient.addColorStop(1, `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`);
-        }
-
-        return gradient;
+    /**
+     * Interpolate between two hue values (handling wrap-around)
+     */
+    lerpHue(h1, h2, t) {
+        let diff = h2 - h1;
+        if (diff > 180) diff -= 360;
+        if (diff < -180) diff += 360;
+        return (h1 + diff * t + 360) % 360;
     }
 
     /**
