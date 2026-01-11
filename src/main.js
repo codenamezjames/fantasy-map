@@ -12,6 +12,7 @@ import { TileLoadManager } from './generation/TileLoadManager.js';
 import { POIGenerator } from './generation/POIGenerator.js';
 import { RegionGenerator } from './generation/RegionGenerator.js';
 import { RoadGenerator } from './generation/RoadGenerator.js';
+import { CityGenerator } from './generation/CityGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 import { configLoader } from './utils/ConfigLoader.js';
@@ -83,6 +84,9 @@ class MapGenerator {
         // Separate RNG for roads
         this.roadRng = new SeededRandom(cfg.roads?.seed || 'roads-1');
         this.roadGenerator = new RoadGenerator(this.roadRng);
+
+        // City generation for settlement detail views
+        this.cityGenerator = new CityGenerator();
 
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
@@ -441,8 +445,36 @@ class MapGenerator {
         this.tileLoadManager = new TileLoadManager(
             this.world,
             this.subTileGenerator,
-            { seed: this.config.seed }
+            {
+                seed: this.config.seed,
+                onCityModeChange: (event) => this.handleCityModeChange(event)
+            }
         );
+    }
+
+    /**
+     * Handle city mode transitions (entering/exiting settlement detail view)
+     * @param {Object} event - City mode change event
+     * @param {boolean} event.entering - True if entering city mode
+     * @param {boolean} event.exiting - True if exiting city mode
+     * @param {POI} event.poi - The settlement POI (null when exiting)
+     */
+    handleCityModeChange(event) {
+        if (event.entering) {
+            // Generate city when entering city mode
+            const city = this.cityGenerator.generate(
+                event.poi,
+                this.world,
+                this.config.seed
+            );
+            // Store city in the cityMode state
+            this.tileLoadManager.cityMode.city = city;
+            console.log(`Entered city mode: ${city.name}, streets: ${city.streets?.edges?.size ?? 0}`);
+        } else if (event.exiting) {
+            console.log('Exited city mode');
+        }
+        // Re-render to show/hide city streets
+        this.viewer.render();
     }
 
     /**
@@ -465,6 +497,12 @@ class MapGenerator {
 
         // Draw roads
         this.drawRoads(ctx, camera);
+
+        // Draw city streets and buildings when in city mode
+        if (this.tileLoadManager && this.tileLoadManager.isInCityMode()) {
+            this.drawCityStreets(ctx, camera);
+            this.drawCityBuildings(ctx, camera);
+        }
 
         // Draw region borders and selection (if enabled)
         if (this.showRegions) {
@@ -1274,6 +1312,146 @@ class MapGenerator {
             }
         }
         return 'path';  // Default
+    }
+
+    /**
+     * Draw city streets when in city mode
+     * Streets are rendered as lines connecting street nodes
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} camera - Camera with scale and viewport
+     */
+    drawCityStreets(ctx, camera) {
+        const cityMode = this.tileLoadManager.getCityModeState();
+        if (!cityMode.city || !cityMode.city.streets) return;
+
+        const network = cityMode.city.streets;
+        if (!network.nodes || !network.edges) return;
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Street widths by type (in world units)
+        const streetWidths = {
+            main: 8,
+            district: 5,
+            alley: 2
+        };
+
+        // Draw edges by type: alleys first (bottom), then district, then main (top)
+        // This ensures main roads are rendered on top of smaller streets
+        for (const type of ['alley', 'district', 'main']) {
+            ctx.strokeStyle = this.theme.getStreetColor(type);
+
+            for (const edge of network.edges.values()) {
+                if (edge.type !== type) continue;
+
+                const nodeA = network.nodes.get(edge.nodeIdA);
+                const nodeB = network.nodes.get(edge.nodeIdB);
+                if (!nodeA || !nodeB) continue;
+
+                // Use edge.width if defined, otherwise fall back to type-based width
+                const width = edge.width ?? streetWidths[type] ?? 2;
+                ctx.lineWidth = width / camera.scale;
+
+                ctx.beginPath();
+                ctx.moveTo(nodeA.position[0], nodeA.position[1]);
+                ctx.lineTo(nodeB.position[0], nodeB.position[1]);
+                ctx.stroke();
+            }
+        }
+
+        // Optional: Draw street outlines for definition
+        // Uses a darker stroke on top for visual separation
+        ctx.strokeStyle = this.theme.getStreetStrokeColor();
+        for (const type of ['alley', 'district', 'main']) {
+            const outlineWidth = type === 'main' ? 0.8 : type === 'district' ? 0.5 : 0.3;
+
+            for (const edge of network.edges.values()) {
+                if (edge.type !== type) continue;
+
+                const nodeA = network.nodes.get(edge.nodeIdA);
+                const nodeB = network.nodes.get(edge.nodeIdB);
+                if (!nodeA || !nodeB) continue;
+
+                ctx.lineWidth = outlineWidth / camera.scale;
+
+                ctx.beginPath();
+                ctx.moveTo(nodeA.position[0], nodeA.position[1]);
+                ctx.lineTo(nodeB.position[0], nodeB.position[1]);
+                ctx.stroke();
+            }
+        }
+
+        // Draw special nodes (gates, plazas, intersections) if they have a visible type
+        const specialNodeTypes = ['gate', 'plaza', 'market', 'well'];
+        ctx.fillStyle = this.theme.getStreetStrokeColor();
+
+        for (const node of network.nodes.values()) {
+            if (!node.type || !specialNodeTypes.includes(node.type)) continue;
+
+            const radius = (node.type === 'plaza' || node.type === 'market') ? 4 : 2;
+            ctx.beginPath();
+            ctx.arc(node.position[0], node.position[1], radius / camera.scale, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    /**
+     * Draw buildings in city mode
+     * Buildings are rendered as filled polygons with optional shadows
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {Object} camera - Camera with scale and viewport
+     */
+    drawCityBuildings(ctx, camera) {
+        const cityMode = this.tileLoadManager.getCityModeState();
+        if (!cityMode.city || !cityMode.city.buildings) return;
+
+        const buildings = cityMode.city.buildings;
+        if (buildings.length === 0) return;
+
+        // Sort by Y position for pseudo-3D (back to front rendering)
+        const sorted = [...buildings].sort((a, b) => {
+            const aY = a.position ? a.position[1] : a.vertices[0][1];
+            const bY = b.position ? b.position[1] : b.vertices[0][1];
+            return aY - bY;
+        });
+
+        for (const building of sorted) {
+            if (!building.vertices || building.vertices.length < 3) continue;
+
+            // Draw shadow first (offset by height)
+            if (building.height > 0.5) {
+                const shadowOffset = building.height * 3 / camera.scale;
+                ctx.fillStyle = this.theme.getBuildingShadowColor();
+                ctx.beginPath();
+                ctx.moveTo(
+                    building.vertices[0][0] + shadowOffset,
+                    building.vertices[0][1] + shadowOffset
+                );
+                for (let i = 1; i < building.vertices.length; i++) {
+                    ctx.lineTo(
+                        building.vertices[i][0] + shadowOffset,
+                        building.vertices[i][1] + shadowOffset
+                    );
+                }
+                ctx.closePath();
+                ctx.fill();
+            }
+
+            // Draw building fill
+            ctx.fillStyle = building.color || this.theme.getBuildingColor(building.type);
+            ctx.strokeStyle = this.theme.getBuildingStrokeColor();
+            ctx.lineWidth = 1 / camera.scale;
+
+            ctx.beginPath();
+            ctx.moveTo(building.vertices[0][0], building.vertices[0][1]);
+            for (let i = 1; i < building.vertices.length; i++) {
+                ctx.lineTo(building.vertices[i][0], building.vertices[i][1]);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.stroke();
+        }
     }
 
     /**

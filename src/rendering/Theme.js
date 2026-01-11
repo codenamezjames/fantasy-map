@@ -468,4 +468,112 @@ export class Theme {
         }
         THEMES[name] = definition;
     }
+
+    /**
+     * Get street fill color based on street type
+     * @param {string} type - Street type (main, district, alley)
+     * @returns {string} HSL color string
+     */
+    getStreetColor(type) {
+        // Street colors - warm browns/tans that work across themes
+        const streetColors = {
+            main:     { h: 35, s: 25, l: 45 },  // Main roads - slightly darker
+            district: { h: 35, s: 20, l: 50 },  // District streets - medium
+            alley:    { h: 35, s: 15, l: 55 }   // Alleys - lighter, less prominent
+        };
+
+        // Adjust based on theme for better contrast
+        const themeAdjust = {
+            dark:      { l: -15, s: -5 },
+            parchment: { l: -20, s: 10 },
+            sepia:     { l: -5, s: 5 },
+            ocean:     { l: -10, s: -5 },
+            forest:    { l: -10, s: 0 }
+        };
+
+        const base = streetColors[type] || streetColors.alley;
+        const adjust = themeAdjust[this.currentName] || { l: 0, s: 0 };
+
+        const h = base.h;
+        const s = Math.max(5, Math.min(60, base.s + adjust.s));
+        const l = Math.max(20, Math.min(70, base.l + adjust.l));
+
+        return `hsl(${h}, ${s}%, ${l}%)`;
+    }
+
+    /**
+     * Get street stroke/outline color
+     * @returns {string} HSL color string
+     */
+    getStreetStrokeColor() {
+        // Darker outline for street edges
+        const base = { h: 30, s: 15, l: 30 };
+
+        // Adjust for dark themes
+        if (this.currentName === 'dark' || this.currentName === 'ocean' || this.currentName === 'forest') {
+            return `hsl(${base.h}, ${base.s}%, 20%)`;
+        }
+
+        return `hsl(${base.h}, ${base.s}%, ${base.l}%)`;
+    }
+
+    /**
+     * Get building fill color based on building type
+     * @param {string} type - Building type (house, shop, temple, etc.)
+     * @returns {string} HSL color string
+     */
+    getBuildingColor(type) {
+        const colors = {
+            house:      { h: 30, s: 40, l: 55 },   // Warm tan
+            shop:       { h: 35, s: 45, l: 50 },   // Brown
+            temple:     { h: 45, s: 30, l: 65 },   // Light gold
+            tavern:     { h: 25, s: 50, l: 45 },   // Dark brown
+            warehouse:  { h: 20, s: 25, l: 40 },   // Gray-brown
+            market:     { h: 40, s: 35, l: 60 },   // Light tan
+            castle:     { h: 220, s: 15, l: 45 },  // Gray-blue
+            wall_tower: { h: 30, s: 20, l: 50 }    // Stone gray
+        };
+
+        // Adjust colors based on theme
+        const themeAdjust = {
+            dark:      { l: -15, s: -10 },
+            parchment: { l: 5, s: 5 },
+            sepia:     { l: -5, s: -5 },
+            ocean:     { l: -10, s: -5 },
+            forest:    { l: -10, s: 0 }
+        };
+
+        const base = colors[type] ?? colors.house;
+        const adjust = themeAdjust[this.currentName] || { l: 0, s: 0 };
+
+        const h = base.h;
+        const s = Math.max(5, Math.min(60, base.s + adjust.s));
+        const l = Math.max(20, Math.min(80, base.l + adjust.l));
+
+        return `hsl(${h}, ${s}%, ${l}%)`;
+    }
+
+    /**
+     * Get building stroke/outline color
+     * @returns {string} RGBA color string
+     */
+    getBuildingStrokeColor() {
+        return this.isDark() ? 'rgba(0,0,0,0.5)' : 'rgba(0,0,0,0.3)';
+    }
+
+    /**
+     * Get building shadow color
+     * @returns {string} RGBA color string
+     */
+    getBuildingShadowColor() {
+        return 'rgba(0,0,0,0.2)';
+    }
+
+    /**
+     * Check if current theme is a dark theme
+     * @returns {boolean} True if dark theme
+     */
+    isDark() {
+        return ['dark', 'ocean', 'forest', 'default', 'sepia'].includes(this.currentName);
+    }
 }
