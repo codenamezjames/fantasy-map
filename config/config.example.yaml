@@ -1,0 +1,235 @@
+# Fantasy Map Generator - Configuration Example
+# =============================================
+# Copy this file to config/index.yaml to override defaults
+# Or upload it via the "Upload Config" button in the UI
+#
+# Only include the values you want to override - all others use defaults
+# Supports multi-file configs with imports (see bottom of file)
+
+# Base seed for world generation - change for different worlds
+seed: 'cassini'
+
+# World settings
+world:
+  width: 2000                    # World width in pixels
+  height: 2000                   # World height in pixels
+  tileCount: 15000               # Number of Voronoi cells
+  relaxationIterations: 2        # Lloyd relaxation passes (higher = more uniform tiles)
+  densityContrast: 3             # Land tiles density vs ocean (1 = uniform)
+
+  # Biome-based density multipliers (higher = smaller/denser tiles)
+  biomeDensity:
+    forest: 1.5
+    desert: 0.4
+    tundra: 0.5
+    grassland: 0.9
+    default: 1
+
+# Elevation settings
+elevation:
+  seaLevel: 0.53                 # Tiles below this are water (~60% water at 0.53)
+  edgeMargin: 0.15               # Border falloff for ocean at edges (0-1)
+
+# Water features
+water:
+  riverSeed: 'rivers-1'          # Change to regenerate rivers only
+  riverCount: 100                # Target number of main rivers
+  minSourceElevation: 0.4        # Minimum elevation for river sources
+  minSourceMoisture: 0.2         # Minimum moisture for river sources
+  sourceSpacing: 6               # Minimum tiles between river sources
+  maxHigherNeighbors: 3          # Max neighbors that can be higher (more = more sources)
+
+# Sub-tile generation (hierarchical zoom)
+subtiles:
+  baseCount: 12                  # Base sub-tiles per parent
+  elevationVariation: 0.1        # Max elevation deviation from parent
+  moistureVariation: 0.1         # Max moisture deviation from parent
+  maxLoadedParents: 50           # Max parents with loaded children (memory limit)
+  minParentArea: 10              # Minimum parent tile area to subdivide
+  zoomThresholds: [0, 40, 60, 80]  # Zoom % where each level starts
+
+# Points of Interest
+pois:
+  seed: 'pois-1'                 # Change to regenerate POIs only
+
+  # How many of each POI type to generate
+  counts:
+    capitals: 5
+    cities: 15
+    towns: 40
+    villages: 100
+    dungeons: 20
+    temples: 10
+    ruins: 30
+    ports: 15
+
+  # Minimum distance between POIs of each type
+  minDistances:
+    capital: 500
+    city: 300
+    town: 150
+    village: 50
+    dungeon: 200
+    temple: 250
+    ruins: 100
+    port: 200
+
+  # Biome preferences (higher = more likely to spawn there)
+  biomePreferences:
+    village:
+      temperate_grassland: 2
+      temperate_forest: 1.5
+      savanna: 1.2
+      default: 0.5
+    town:
+      temperate_grassland: 2
+      temperate_forest: 1.5
+      beach: 1.3
+      default: 0.6
+    city:
+      temperate_grassland: 2.5
+      beach: 1.5
+      default: 0.4
+    capital:
+      temperate_grassland: 2
+      temperate_forest: 1.5
+      default: 1
+    dungeon:
+      snow: 2
+      tundra: 1.5
+      taiga: 1.5
+      marsh: 1.3
+      default: 0.5
+    temple:
+      temperate_forest: 1.5
+      tropical_forest: 1.5
+      rainforest: 1.3
+      default: 1
+    ruins:
+      desert: 2
+      tundra: 1.5
+      savanna: 1.3
+      default: 0.8
+    port:
+      beach: 3
+      default: 0
+
+  # Tile occupation (rings of tiles each POI type occupies)
+  tileOccupation:
+    capital: 3
+    city: 2
+    town: 1
+    port: 1
+    village: 0
+    dungeon: 0
+    temple: 0
+    ruins: 0
+
+  # Rendering settings
+  rendering:
+    dotSize: 3
+    symbolSize: 8
+    iconSize: 16
+    labelOffset: 12
+    labelFont: '12px sans-serif'
+
+# Regions / Kingdoms
+regions:
+  seed: 'regions-1'              # Change to regenerate regions only
+
+  # Pathfinding costs for region growth
+  costs:
+    base: 1
+    riverCrossing: 5
+    mountainBase: 8
+    mountainSteep: 15
+    elevationPenalty: 10
+
+  # Region colors (HSL)
+  colors:
+    - { h: 0, s: 35, l: 45 }     # Red
+    - { h: 45, s: 35, l: 45 }    # Orange
+    - { h: 120, s: 35, l: 40 }   # Green
+    - { h: 210, s: 35, l: 45 }   # Blue
+    - { h: 280, s: 35, l: 45 }   # Purple
+
+  borderWidth: 2
+  borderOpacity: 0.7
+
+# Roads
+roads:
+  seed: 'roads-1'                # Change to regenerate roads only
+
+  # Pathfinding costs
+  costs:
+    base: 1
+    forest: 2
+    hills: 3
+    mountains: 8
+    peaks: 20
+    riverCrossing: 3
+    existingRoadBonus: -0.5      # Negative = prefer existing roads
+
+  # Connection rules
+  connections:
+    capitalToCapitals: true      # Connect all capitals
+    capitalToCities: 2           # Connect capital to N nearest cities
+    cityToCities: 2
+    cityToTowns: 2
+    townToTowns: 2
+    townToVillages: 3
+    villageToTown: 1
+    specialToSettlement: 1
+
+  # Rendering settings
+  rendering:
+    majorWidth: 4                # Capital-to-capital roads
+    minorWidth: 2.5              # City roads
+    pathWidth: 1.5               # Town/village paths
+    color: { h: 35, s: 30, l: 40 }  # Brown/tan
+    opacity: 0.85
+
+# Visual rendering
+rendering:
+  # Elevation lightness adjustment
+  elevationShift:
+    baseline: 0.4                # Elevation considered "neutral"
+    multiplier: 60               # How much lightness changes with elevation
+
+  # Hillshading
+  hillshade:
+    multiplier: 85               # Strength of light/shadow effect
+
+  # Elevation tinting (hue shift)
+  elevationTint:
+    enabled: true
+    highHueShift: -20            # Shift toward cool at high elevation
+    lowHueShift: 15              # Shift toward warm at low elevation
+
+  # Saturation at elevation extremes
+  elevationSaturation:
+    enabled: true
+    extremeReduction: 25         # How much to reduce saturation at peaks/valleys
+    peakThreshold: 0.75          # Elevation above this loses saturation
+    valleyThreshold: 0.35        # Elevation below this loses saturation
+
+  # River appearance
+  rivers:
+    coreOpacity: 0.9
+    coreWidth: 2
+    flowWidthMultiplier: 0.1
+    zoomWidthPower: 1            # How much rivers thin when zoomed out
+    zoomOpacityMin: 0.9          # River opacity when fully zoomed out
+    zoomOpacityScale: 0.1        # How quickly rivers become opaque
+
+# =============================================
+# Multi-file configuration (for index.yaml)
+# =============================================
+# You can split config into multiple files using imports:
+#
+# imports:
+#   - world.yaml
+#   - pois.yaml
+#   - rendering.yaml
+#
+# Each file is merged in order, later files override earlier ones

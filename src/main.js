@@ -14,6 +14,7 @@ import { RegionGenerator } from './generation/RegionGenerator.js';
 import { RoadGenerator } from './generation/RoadGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
+import { configLoader } from './utils/ConfigLoader.js';
 
 /**
  * Fantasy Map Generator
@@ -21,16 +22,39 @@ import { CONFIG } from './config.js';
  */
 class MapGenerator {
     constructor(config = {}) {
+        // Use merged config from configLoader
+        const mergedConfig = configLoader.getConfig();
+
         this.config = {
-            seed: config.seed || CONFIG.seed || 'default',
-            worldWidth: config.worldWidth || CONFIG.world.width,
-            worldHeight: config.worldHeight || CONFIG.world.height,
+            seed: config.seed || mergedConfig.seed || 'default',
+            worldWidth: config.worldWidth || mergedConfig.world.width,
+            worldHeight: config.worldHeight || mergedConfig.world.height,
             ...config
         };
 
         this.canvas = null;
         this.ctx = null;
         this.viewer = null;
+
+        this.initGenerators(mergedConfig);
+
+        // Theme - load from localStorage or default to 'dark'
+        const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
+        this.theme = new Theme(savedTheme);
+
+        // Selected region for highlighting
+        this.selectedRegionId = null;
+
+        // UI options - load from localStorage
+        this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
+        this.showTileBorders = localStorage.getItem('mapGenerator.showTileBorders') !== 'false';
+        this.showGradientBlend = localStorage.getItem('mapGenerator.showGradientBlend') === 'true';
+    }
+
+    /**
+     * Initialize all generators with config
+     */
+    initGenerators(cfg) {
         this.rng = new SeededRandom(this.config.seed);
         this.noise = new NoiseGenerator(this.rng);
 
@@ -44,36 +68,72 @@ class MapGenerator {
         this.biomeGenerator = new BiomeGenerator();
 
         // Separate RNG for rivers so they can be regenerated independently
-        this.riverRng = new SeededRandom(CONFIG.water.riverSeed);
+        this.riverRng = new SeededRandom(cfg.water?.riverSeed || 'rivers-1');
         this.waterGenerator = new WaterGenerator(this.riverRng);
 
         // Separate RNG for POIs
-        this.poiRng = new SeededRandom(CONFIG.pois?.seed || 'pois-1');
+        this.poiRng = new SeededRandom(cfg.pois?.seed || 'pois-1');
         this.poiGenerator = new POIGenerator(this.poiRng);
 
         // Separate RNG for regions
-        this.regionRng = new SeededRandom(CONFIG.regions?.seed || 'regions-1');
+        this.regionRng = new SeededRandom(cfg.regions?.seed || 'regions-1');
         this.regionGenerator = new RegionGenerator(this.regionRng);
 
         // Separate RNG for roads
-        this.roadRng = new SeededRandom(CONFIG.roads?.seed || 'roads-1');
+        this.roadRng = new SeededRandom(cfg.roads?.seed || 'roads-1');
         this.roadGenerator = new RoadGenerator(this.roadRng);
 
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
         this.tileLoadManager = null; // Created after world generation
+    }
 
-        // Theme - load from localStorage or default to 'dark'
-        const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
-        this.theme = new Theme(savedTheme);
+    /**
+     * Regenerate world with new config (after config override)
+     */
+    regenerateWithConfig() {
+        const mergedConfig = configLoader.getConfig();
 
-        // Selected region for highlighting
-        this.selectedRegionId = null;
+        // Update config values
+        this.config.seed = mergedConfig.seed || this.config.seed;
+        this.config.worldWidth = mergedConfig.world?.width || this.config.worldWidth;
+        this.config.worldHeight = mergedConfig.world?.height || this.config.worldHeight;
 
-        // UI options - load from localStorage
-        this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
-        this.showTileBorders = localStorage.getItem('mapGenerator.showTileBorders') !== 'false';
-        this.showGradientBlend = localStorage.getItem('mapGenerator.showGradientBlend') === 'true';
+        // Reinitialize generators with new config
+        this.initGenerators(mergedConfig);
+
+        // Regenerate world
+        this.generateWorld();
+
+        // Re-render
+        if (this.viewer) {
+            this.viewer.render();
+        }
+
+        console.log('World regenerated with new config');
+    }
+
+    /**
+     * Handle config file upload from browser
+     */
+    async handleConfigUpload(file) {
+        try {
+            await configLoader.loadFromFile(file);
+            this.regenerateWithConfig();
+            return true;
+        } catch (err) {
+            console.error('Config upload failed:', err.message);
+            return false;
+        }
+    }
+
+    /**
+     * Reset config to defaults and regenerate
+     */
+    resetConfig() {
+        configLoader.reset();
+        this.regenerateWithConfig();
+        console.log('Config reset to defaults');
     }
 
     /**
@@ -233,6 +293,43 @@ class MapGenerator {
             gradientBlendToggle.checked = this.showGradientBlend;
             gradientBlendToggle.addEventListener('change', (e) => {
                 this.setShowGradientBlend(e.target.checked);
+            });
+        }
+
+        // Setup config upload button
+        const configUploadBtn = document.getElementById('config-upload-btn');
+        const configFileInput = document.getElementById('config-file-input');
+        if (configUploadBtn && configFileInput) {
+            configUploadBtn.addEventListener('click', () => {
+                configFileInput.click();
+            });
+
+            configFileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const success = await this.handleConfigUpload(file);
+                    if (success) {
+                        configUploadBtn.textContent = 'Config loaded!';
+                        setTimeout(() => {
+                            configUploadBtn.textContent = 'Upload Config';
+                        }, 2000);
+                    } else {
+                        configUploadBtn.textContent = 'Upload failed';
+                        setTimeout(() => {
+                            configUploadBtn.textContent = 'Upload Config';
+                        }, 2000);
+                    }
+                    // Reset input so same file can be re-uploaded
+                    configFileInput.value = '';
+                }
+            });
+        }
+
+        // Setup config reset button
+        const configResetBtn = document.getElementById('config-reset-btn');
+        if (configResetBtn) {
+            configResetBtn.addEventListener('click', () => {
+                this.resetConfig();
             });
         }
     }
@@ -1302,17 +1399,23 @@ class MapGenerator {
 }
 
 // Initialize on DOM load
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    // Load config overrides from config/ folder (if any)
+    await configLoader.loadFromFileSystem();
+
+    const mergedConfig = configLoader.getConfig();
+
     const generator = new MapGenerator({
-        seed: CONFIG.seed,
-        worldWidth: CONFIG.world.width,
-        worldHeight: CONFIG.world.height
+        seed: mergedConfig.seed,
+        worldWidth: mergedConfig.world.width,
+        worldHeight: mergedConfig.world.height
     });
 
     generator.init();
 
     // Expose to window for debugging
     window.mapGenerator = generator;
+    window.configLoader = configLoader;
 });
 
 export { MapGenerator };
