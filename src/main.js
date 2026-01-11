@@ -15,6 +15,7 @@ import { RoadGenerator } from './generation/RoadGenerator.js';
 import { Theme } from './rendering/Theme.js';
 import { CONFIG } from './config.js';
 import { configLoader } from './utils/ConfigLoader.js';
+import { POI } from './data/POI.js';
 
 /**
  * Fantasy Map Generator
@@ -134,6 +135,63 @@ class MapGenerator {
         configLoader.reset();
         this.regenerateWithConfig();
         console.log('Config reset to defaults');
+    }
+
+    /**
+     * Add custom POIs from config to the world
+     * Custom POIs are defined in config.customPOIs array
+     */
+    addCustomPOIs() {
+        const cfg = configLoader.getConfig();
+        const customPOIs = cfg.customPOIs || [];
+
+        if (customPOIs.length === 0) return;
+
+        let addedCount = 0;
+        for (const poiData of customPOIs) {
+            // Validate required fields
+            if (!poiData.name || !poiData.position) {
+                console.warn('Custom POI missing name or position:', poiData);
+                continue;
+            }
+
+            const [x, y] = poiData.position;
+
+            // Find the tile at this position
+            const tile = this.world.getTileAtPosition(x, y);
+            if (!tile) {
+                console.warn(`Custom POI "${poiData.name}" at [${x}, ${y}] is outside world bounds`);
+                continue;
+            }
+
+            // Create the POI
+            const poi = new POI({
+                id: this.world.nextPoiId++,
+                name: poiData.name,
+                type: poiData.type || 'ruins',
+                position: [x, y],
+                tileId: tile.id,
+                size: poiData.size || 'medium',
+                population: poiData.population || 0,
+                regionId: tile.regionId,
+                isCapital: false,
+                // Custom POIs visible at all zoom levels by default
+                minZoom: poiData.minZoom ?? -100,
+                maxZoom: poiData.maxZoom ?? 100
+            });
+
+            // Store custom description if provided
+            if (poiData.description) {
+                poi.description = poiData.description;
+            }
+
+            this.world.addPOI(poi);
+            addedCount++;
+        }
+
+        if (addedCount > 0) {
+            console.log(`Added ${addedCount} custom POIs from config`);
+        }
     }
 
     /**
@@ -369,6 +427,9 @@ class MapGenerator {
 
         // Generate regions (grow from capitals)
         this.regionGenerator.generate(this.world);
+
+        // Add custom POIs from config (after regions so they get regionId)
+        this.addCustomPOIs();
 
         // Generate roads (connect POIs with pathfinding)
         this.roadGenerator.generate(this.world);
@@ -912,6 +973,7 @@ class MapGenerator {
         const regionName = region?.name || 'Unclaimed';
 
         const detailsHTML = `
+            ${poi.description ? `<div class="poi-description">${poi.description}</div>` : ''}
             <div class="poi-detail-row">
                 <span class="poi-detail-label">Population:</span>
                 <span class="poi-detail-value">${population}</span>

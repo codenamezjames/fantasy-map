@@ -223,6 +223,53 @@ rendering:
     zoomOpacityScale: 0.1        # How quickly rivers become opaque
 
 # =============================================
+# Custom POIs (player-defined locations)
+# =============================================
+# Add specific locations to the map that you define
+# Great for campaign-specific places discovered during play
+
+customPOIs:
+  # Example: Ancient ruins discovered by the party
+  - name: "Ruins of Eldrath"
+    type: ruins                  # village, town, city, capital, dungeon, temple, ruins, port
+    position: [500, 750]         # [x, y] world coordinates
+    size: medium                 # small, medium, large
+    description: "Ancient elven ruins discovered on Day 3"
+
+  # Example: A hidden temple
+  - name: "Temple of the Moon"
+    type: temple
+    position: [1200, 300]
+    size: large
+    description: "Sacred temple to the moon goddess"
+
+  # Example: A dangerous dungeon
+  - name: "The Undercrypt"
+    type: dungeon
+    position: [800, 1400]
+    size: medium
+    population: 0
+    description: "Entrance to a vast underground complex"
+
+  # Example: A small settlement
+  - name: "Millbrook"
+    type: village
+    position: [1500, 900]
+    size: small
+    population: 150
+    description: "A quiet farming village"
+
+# Custom POI fields:
+#   name: (required) Display name
+#   position: (required) [x, y] coordinates in world space
+#   type: POI type - affects icon/rendering (default: ruins)
+#   size: small, medium, large (default: medium)
+#   population: Number (default: 0)
+#   description: Text shown in POI dialog (optional)
+#   minZoom: Minimum zoom % to show (default: -100)
+#   maxZoom: Maximum zoom % to show (default: 100)
+
+# =============================================
 # Multi-file configuration (for index.yaml)
 # =============================================
 # You can split config into multiple files using imports:

@@ -212,6 +212,17 @@ html, body {
     gap: 8px;
 }
 
+.poi-description {
+    font-size: 12px;
+    font-style: italic;
+    color: rgba(255, 255, 255, 0.7);
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+    border-left: 2px solid rgba(100, 150, 255, 0.4);
+    margin-bottom: 4px;
+}
+
 .poi-detail-row {
     display: flex;
     justify-content: space-between;
