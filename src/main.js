@@ -346,14 +346,19 @@ class MapGenerator {
                 this.drawTileWithGradient(ctx, tile);
             } else {
                 // Draw solid color
+                const fillColor = this.theme.getTileColor(tile);
                 ctx.beginPath();
                 ctx.moveTo(vertices[0][0], vertices[0][1]);
                 for (let i = 1; i < vertices.length; i++) {
                     ctx.lineTo(vertices[i][0], vertices[i][1]);
                 }
                 ctx.closePath();
-                ctx.fillStyle = this.theme.getTileColor(tile);
+                ctx.fillStyle = fillColor;
                 ctx.fill();
+                // Add thin stroke in same color to cover anti-aliasing gaps
+                ctx.strokeStyle = fillColor;
+                ctx.lineWidth = 1 / camera.scale;
+                ctx.stroke();
             }
 
             // Stroke outline (if enabled)
@@ -380,6 +385,16 @@ class MapGenerator {
         const tileHSL = this.theme.getTileHSL(tile);
         const tileColor = `hsl(${tileHSL.h}, ${tileHSL.s}%, ${tileHSL.l}%)`;
 
+        // Draw solid base color first to prevent gaps between triangles
+        ctx.beginPath();
+        ctx.moveTo(vertices[0][0], vertices[0][1]);
+        for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i][0], vertices[i][1]);
+        }
+        ctx.closePath();
+        ctx.fillStyle = tileColor;
+        ctx.fill();
+
         // Build edge-to-neighbor map
         const edgeNeighbors = this.getEdgeNeighborMap(tile);
 
@@ -400,16 +415,17 @@ class MapGenerator {
             // Create linear gradient from center toward edge midpoint
             const gradient = ctx.createLinearGradient(cx, cy, edgeMidX, edgeMidY);
             gradient.addColorStop(0, tileColor);
-            gradient.addColorStop(0.4, tileColor);
+            gradient.addColorStop(0.9, tileColor);  // Stay solid until 75%
 
-            if (neighbor) {
+            if (neighbor && !neighbor.isWater) {
                 const nHSL = this.theme.getTileHSL(neighbor);
-                // Blend 50% toward neighbor at edge
-                const blendH = this.lerpHue(tileHSL.h, nHSL.h, 0.5);
-                const blendS = tileHSL.s * 0.5 + nHSL.s * 0.5;
-                const blendL = tileHSL.l * 0.5 + nHSL.l * 0.5;
+                // Blend 35% toward neighbor at edge (subtle blend)
+                const blendH = this.lerpHue(tileHSL.h, nHSL.h, 0.35);
+                const blendS = tileHSL.s * 0.65 + nHSL.s * 0.35;
+                const blendL = tileHSL.l * 0.65 + nHSL.l * 0.35;
                 gradient.addColorStop(1, `hsl(${blendH}, ${blendS}%, ${blendL}%)`);
             } else {
+                // No blend for water neighbors or missing neighbors
                 gradient.addColorStop(1, tileColor);
             }
 
@@ -422,6 +438,17 @@ class MapGenerator {
             ctx.fillStyle = gradient;
             ctx.fill();
         }
+
+        // Add thin stroke in tile color to cover anti-aliasing gaps between tiles
+        ctx.beginPath();
+        ctx.moveTo(vertices[0][0], vertices[0][1]);
+        for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i][0], vertices[i][1]);
+        }
+        ctx.closePath();
+        ctx.strokeStyle = tileColor;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
     }
 
     /**
