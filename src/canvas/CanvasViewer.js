@@ -42,6 +42,9 @@ export class CanvasViewer {
         // Hover callback (set by MapGenerator for cursor changes)
         this.onHover = config.onHover || null;
 
+        // Measurement data callback (set by MapGenerator)
+        this.getMeasurementData = config.getMeasurementData || null;
+
         // Track drag distance to distinguish clicks from drags
         this.dragStartX = 0;
         this.dragStartY = 0;
@@ -378,6 +381,63 @@ export class CanvasViewer {
 
         // Distance scale bar (bottom-right) — 1 world unit = 0.5 miles
         this.drawScaleBar(ctx, camera);
+
+        // Measurement total distance readout (bottom-left)
+        if (this.getMeasurementData) {
+            const data = this.getMeasurementData();
+            if (data.points.length > 0) {
+                this.drawMeasurementOverlay(ctx, data);
+            }
+        }
+    }
+
+    /**
+     * Draw measurement distance readout panel (bottom-left, screen space)
+     */
+    drawMeasurementOverlay(ctx, data) {
+        const overlayBg = this.getOverlayBackground();
+        const overlayText = this.getOverlayText();
+
+        const pad = 20;
+        const panelW = 180;
+        const panelH = data.points.length >= 2 ? 52 : 32;
+        const panelX = pad;
+        const panelY = this.canvas.height - pad - panelH;
+
+        ctx.fillStyle = overlayBg;
+        ctx.fillRect(panelX, panelY, panelW, panelH);
+
+        ctx.fillStyle = overlayText;
+        ctx.font = 'bold 13px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        if (data.points.length >= 2) {
+            const dist = data.totalDistance;
+            const label = dist >= 1
+                ? `${dist.toFixed(1)} miles`
+                : `${(dist * 5280).toFixed(0)} ft`;
+            ctx.fillText(`Total: ${label}`, panelX + 10, panelY + 8);
+
+            ctx.font = '11px monospace';
+            ctx.globalAlpha = 0.6;
+            ctx.fillText(`${data.points.length} waypoints`, panelX + 10, panelY + 28);
+            ctx.globalAlpha = 1;
+        } else {
+            ctx.font = '11px monospace';
+            ctx.globalAlpha = 0.7;
+            ctx.fillText('Click to add waypoints', panelX + 10, panelY + 8);
+            ctx.globalAlpha = 1;
+        }
+
+        // Hint line
+        ctx.fillStyle = overlayText;
+        ctx.globalAlpha = 0.4;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('Esc/Right-click: clear', panelX + panelW - 6, panelY + panelH - 12);
+        ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
     }
 
     /**

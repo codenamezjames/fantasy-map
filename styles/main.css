@@ -123,6 +123,16 @@ html, body {
     border-color: rgba(255, 255, 255, 0.3);
 }
 
+.config-btn-active {
+    background: rgba(255, 100, 100, 0.35);
+    border-color: rgba(255, 100, 100, 0.6);
+}
+
+.config-btn-active:hover {
+    background: rgba(255, 100, 100, 0.5);
+    border-color: rgba(255, 100, 100, 0.7);
+}
+
 /* POI Dialog */
 .poi-dialog {
     position: fixed;

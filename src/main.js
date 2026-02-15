@@ -47,6 +47,10 @@ class MapGenerator {
         // Selected region for highlighting
         this.selectedRegionId = null;
 
+        // Measurement tool state
+        this.measureMode = false;
+        this.measurePoints = []; // Array of {x, y} world coordinates
+
         // UI options - load from localStorage
         this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
         this.showTileBorders = localStorage.getItem('mapGenerator.showTileBorders') !== 'false';
@@ -345,6 +349,54 @@ class MapGenerator {
     }
 
     /**
+     * Toggle distance measurement mode
+     */
+    toggleMeasureMode() {
+        this.measureMode = !this.measureMode;
+        if (this.measureMode) {
+            this.measurePoints = [];
+        }
+        // Update button active state
+        const btn = document.getElementById('measure-btn');
+        if (btn) {
+            btn.classList.toggle('config-btn-active', this.measureMode);
+        }
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Clear measurement points and exit measure mode
+     */
+    clearMeasurement() {
+        this.measurePoints = [];
+        this.measureMode = false;
+        const btn = document.getElementById('measure-btn');
+        if (btn) {
+            btn.classList.remove('config-btn-active');
+        }
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Get measurement data for overlay display
+     * @returns {{ points: Array<{x,y}>, totalDistance: number }} distance in miles
+     */
+    getMeasurementData() {
+        const milesPerUnit = 0.5;
+        let totalDistance = 0;
+        for (let i = 1; i < this.measurePoints.length; i++) {
+            const dx = this.measurePoints[i].x - this.measurePoints[i - 1].x;
+            const dy = this.measurePoints[i].y - this.measurePoints[i - 1].y;
+            totalDistance += Math.sqrt(dx * dx + dy * dy) * milesPerUnit;
+        }
+        return { points: this.measurePoints, totalDistance };
+    }
+
+    /**
      * Set the current theme and persist to localStorage
      */
     setTheme(themeName) {
@@ -392,7 +444,8 @@ class MapGenerator {
             getOverlayBackground: () => this.theme.getOverlayBackground(),
             getOverlayText: () => this.theme.getOverlayText(),
             onClick: (worldPos) => this.handleMapClick(worldPos),
-            onHover: (worldPos) => this.handleMapHover(worldPos)
+            onHover: (worldPos) => this.handleMapHover(worldPos),
+            getMeasurementData: () => this.getMeasurementData()
         });
 
         // Handle window resize
@@ -504,6 +557,29 @@ class MapGenerator {
                 this.resetConfig();
             });
         }
+
+        // Setup measure button
+        const measureBtn = document.getElementById('measure-btn');
+        if (measureBtn) {
+            measureBtn.addEventListener('click', () => {
+                this.toggleMeasureMode();
+            });
+        }
+
+        // Escape key clears measurement
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && (this.measureMode || this.measurePoints.length > 0)) {
+                this.clearMeasurement();
+            }
+        });
+
+        // Right-click clears measurement
+        this.canvas.addEventListener('contextmenu', (e) => {
+            if (this.measureMode || this.measurePoints.length > 0) {
+                e.preventDefault();
+                this.clearMeasurement();
+            }
+        });
     }
 
     /**
@@ -655,6 +731,11 @@ class MapGenerator {
 
         // Draw POIs
         this.drawPOIs(ctx, camera);
+
+        // Draw measurement lines and waypoints
+        if (this.measurePoints.length > 0) {
+            this.drawMeasurement(ctx, camera);
+        }
 
         // Draw grid overlay (optional, visible at higher zoom)
         if (camera.isVisibleAtZoom(30, 100)) {
@@ -1040,6 +1121,15 @@ class MapGenerator {
      * @param {Object} worldPos - World coordinates {x, y}
      */
     handleMapClick(worldPos) {
+        // Measurement mode: add waypoint instead of normal click behavior
+        if (this.measureMode) {
+            this.measurePoints.push({ x: worldPos.x, y: worldPos.y });
+            if (this.viewer) {
+                this.viewer.render();
+            }
+            return;
+        }
+
         const poi = this.findPOIAtPosition(worldPos.x, worldPos.y);
         if (poi) {
             this.showPOIDialog(poi);
@@ -1784,6 +1874,74 @@ class MapGenerator {
                 }
             }
         }
+    }
+
+    /**
+     * Draw measurement lines, waypoint markers, and per-segment distance labels
+     * Rendered in world space (camera transform is active)
+     */
+    drawMeasurement(ctx, camera) {
+        const milesPerUnit = 0.5;
+        const points = this.measurePoints;
+
+        ctx.save();
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Dashed lines between consecutive waypoints
+        if (points.length >= 2) {
+            ctx.setLineDash([8 / camera.scale, 6 / camera.scale]);
+            ctx.strokeStyle = '#ff6b6b';
+            ctx.lineWidth = 2.5 / camera.scale;
+
+            ctx.beginPath();
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                ctx.lineTo(points[i].x, points[i].y);
+            }
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Per-segment distance labels at midpoints
+            const fontSize = 12 / camera.scale;
+            ctx.font = `bold ${fontSize}px monospace`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            for (let i = 1; i < points.length; i++) {
+                const dx = points[i].x - points[i - 1].x;
+                const dy = points[i].y - points[i - 1].y;
+                const dist = Math.sqrt(dx * dx + dy * dy) * milesPerUnit;
+                const mx = (points[i].x + points[i - 1].x) / 2;
+                const my = (points[i].y + points[i - 1].y) / 2;
+
+                const label = dist >= 1 ? `${dist.toFixed(1)} mi` : `${(dist * 5280).toFixed(0)} ft`;
+                const tw = ctx.measureText(label).width;
+                const pad = 3 / camera.scale;
+
+                // Background
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                ctx.fillRect(mx - tw / 2 - pad, my - fontSize / 2 - pad, tw + pad * 2, fontSize + pad * 2);
+
+                // Text
+                ctx.fillStyle = '#fff';
+                ctx.fillText(label, mx, my);
+            }
+        }
+
+        // Circle markers at each waypoint
+        for (let i = 0; i < points.length; i++) {
+            const r = 5 / camera.scale;
+            ctx.beginPath();
+            ctx.arc(points[i].x, points[i].y, r, 0, Math.PI * 2);
+            ctx.fillStyle = i === 0 ? '#4aff4a' : '#ff6b6b';
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 1.5 / camera.scale;
+            ctx.stroke();
+        }
+
+        ctx.restore();
     }
 }
 
