@@ -155,6 +155,48 @@ export const CONFIG = {
         }
     },
 
+    // Weather simulation
+    weather: {
+        seed: 'weather-1',
+        daysPerYear: 365,
+        startDay: 80, // Late spring
+        wind: {
+            baseSpeed: 0.5,
+            tradeWindBelt: 0.3,     // 0-30% latitude
+            westerliesBelt: 0.6,    // 30-60% latitude
+            noiseInfluence: 0.2,    // Daily wind variation
+            mountainDeflection: 0.6 // How much mountains bend wind
+        },
+        rainShadow: {
+            elevationThreshold: 0.15, // Elevation rise that triggers rain dump
+            moistureDrop: 0.6,        // How much moisture is lost on leeward side
+            spreadTiles: 3            // How far rain shadow extends
+        },
+        storms: {
+            spawnChance: 0.001,
+            maxActive: 8,
+            minLifetime: 3,
+            maxLifetime: 8,
+            baseRadius: 120,
+            moveSpeed: 1.5,
+            mountainDissipation: 0.3,
+            minMoisture: 0.35,
+            minTemperature: 0.25
+        },
+        seasons: {
+            tempAmplitude: 0.15,
+            precipAmplitude: 0.1
+        },
+        rendering: {
+            windArrowSpacing: 80,
+            windArrowSize: 12,
+            precipColor: 'rgba(100, 150, 255, 0.5)',
+            snowColor: 'rgba(230, 240, 255, 0.7)',
+            cloudColor: 'rgba(180, 190, 210, 0.25)',
+            stormColor: 'rgba(40, 40, 60, 0.4)'
+        }
+    },
+
     // Visual rendering
     rendering: {
         // Elevation lightness shift

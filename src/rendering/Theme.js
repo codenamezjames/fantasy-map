@@ -604,4 +604,50 @@ export class Theme {
     isDark() {
         return ['dark', 'ocean', 'forest', 'default', 'sepia'].includes(this.currentName);
     }
+
+    /**
+     * Get wind arrow color for weather overlay
+     * @returns {string} RGBA color string
+     */
+    getWeatherWindColor() {
+        return this.isDark()
+            ? 'rgba(200, 220, 255, 0.4)'
+            : 'rgba(60, 80, 120, 0.35)';
+    }
+
+    /**
+     * Get precipitation color for weather overlay
+     * @param {boolean} isSnow - True for snow, false for rain
+     * @returns {string} RGBA color string
+     */
+    getWeatherPrecipColor(isSnow) {
+        if (isSnow) {
+            return this.isDark()
+                ? 'rgba(230, 240, 255, 0.7)'
+                : 'rgba(180, 200, 240, 0.6)';
+        }
+        return this.isDark()
+            ? 'rgba(100, 150, 255, 0.5)'
+            : 'rgba(60, 100, 200, 0.4)';
+    }
+
+    /**
+     * Get cloud cover color for weather overlay
+     * @returns {string} RGBA base (alpha will be scaled by cloud intensity)
+     */
+    getWeatherCloudColor() {
+        return this.isDark()
+            ? { r: 180, g: 190, b: 210 }
+            : { r: 140, g: 150, b: 170 };
+    }
+
+    /**
+     * Get storm marker color for weather overlay
+     * @returns {string} RGBA color string
+     */
+    getWeatherStormColor() {
+        return this.isDark()
+            ? 'rgba(40, 40, 60, 0.4)'
+            : 'rgba(60, 60, 80, 0.35)';
+    }
 }

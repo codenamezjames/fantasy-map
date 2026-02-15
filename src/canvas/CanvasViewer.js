@@ -45,6 +45,9 @@ export class CanvasViewer {
         // Measurement data callback (set by MapGenerator)
         this.getMeasurementData = config.getMeasurementData || null;
 
+        // Weather data callback (set by MapGenerator)
+        this.getWeatherData = config.getWeatherData || null;
+
         // Track drag distance to distinguish clicks from drags
         this.dragStartX = 0;
         this.dragStartY = 0;
@@ -382,6 +385,14 @@ export class CanvasViewer {
         // Distance scale bar (bottom-right) — 1 world unit = 0.5 miles
         this.drawScaleBar(ctx, camera);
 
+        // Weather info panel (below zoom bar)
+        if (this.getWeatherData) {
+            const weatherData = this.getWeatherData();
+            if (weatherData && weatherData.active) {
+                this.drawWeatherPanel(ctx, weatherData, overlayBg, overlayText);
+            }
+        }
+
         // Measurement total distance readout (bottom-left)
         if (this.getMeasurementData) {
             const data = this.getMeasurementData();
@@ -437,6 +448,35 @@ export class CanvasViewer {
         ctx.textAlign = 'right';
         ctx.fillText('Esc/Right-click: clear', panelX + panelW - 6, panelY + panelH - 12);
         ctx.textAlign = 'left';
+        ctx.globalAlpha = 1;
+    }
+
+    /**
+     * Draw weather info panel below the zoom overlay
+     */
+    drawWeatherPanel(ctx, weatherData, overlayBg, overlayText) {
+        const panelX = 10;
+        const panelY = this.lastClickPos ? 110 : 94;
+        const panelW = 160;
+        const panelH = 44;
+
+        ctx.fillStyle = overlayBg;
+        ctx.fillRect(panelX, panelY, panelW, panelH);
+
+        ctx.fillStyle = overlayText;
+        ctx.font = '12px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+
+        const season = weatherData.season.charAt(0).toUpperCase() + weatherData.season.slice(1);
+        ctx.fillText(`Day ${weatherData.day} — ${season}`, panelX + 10, panelY + 8);
+
+        ctx.globalAlpha = 0.6;
+        ctx.font = '11px monospace';
+        const stormText = weatherData.stormCount > 0
+            ? `${weatherData.stormCount} storm${weatherData.stormCount > 1 ? 's' : ''} active`
+            : 'Clear skies';
+        ctx.fillText(stormText, panelX + 10, panelY + 26);
         ctx.globalAlpha = 1;
     }
 

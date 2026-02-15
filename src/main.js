@@ -14,6 +14,8 @@ import { RegionGenerator } from './generation/RegionGenerator.js';
 import { RoadGenerator } from './generation/RoadGenerator.js';
 import { CityGenerator } from './generation/CityGenerator.js';
 import { Theme } from './rendering/Theme.js';
+import { WeatherRenderer } from './rendering/WeatherRenderer.js';
+import { WeatherGenerator } from './generation/WeatherGenerator.js';
 import { CONFIG } from './config.js';
 import { configLoader } from './utils/ConfigLoader.js';
 import { POI } from './data/POI.js';
@@ -38,11 +40,11 @@ class MapGenerator {
         this.ctx = null;
         this.viewer = null;
 
-        this.initGenerators(mergedConfig);
-
-        // Theme - load from localStorage or default to 'dark'
+        // Theme - load from localStorage or default to 'dark' (must be before initGenerators)
         const savedTheme = localStorage.getItem('mapGenerator.theme') || 'dark';
         this.theme = new Theme(savedTheme);
+
+        this.initGenerators(mergedConfig);
 
         // Selected region for highlighting
         this.selectedRegionId = null;
@@ -50,6 +52,11 @@ class MapGenerator {
         // Measurement tool state
         this.measureMode = false;
         this.measurePoints = []; // Array of {x, y} world coordinates
+
+        // Weather state
+        this.showWeather = localStorage.getItem('mapGenerator.showWeather') === 'true';
+        this.weatherState = null;
+        this.currentDay = CONFIG.weather?.startDay || 80;
 
         // UI options - load from localStorage
         this.showRegions = localStorage.getItem('mapGenerator.showRegions') !== 'false';
@@ -91,6 +98,11 @@ class MapGenerator {
 
         // City generation for settlement detail views
         this.cityGenerator = new CityGenerator();
+
+        // Weather generation
+        this.weatherRng = new SeededRandom(cfg.weather?.seed || 'weather-1');
+        this.weatherGenerator = new WeatherGenerator(this.weatherRng);
+        this.weatherRenderer = new WeatherRenderer(this.theme);
 
         // Sub-tile generation for hierarchical zoom
         this.subTileGenerator = new SubTileGenerator(this.noise);
@@ -349,6 +361,49 @@ class MapGenerator {
     }
 
     /**
+     * Toggle weather overlay visibility
+     */
+    setShowWeather(show) {
+        this.showWeather = show;
+        localStorage.setItem('mapGenerator.showWeather', show);
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Advance to the next day, recompute weather, re-render
+     */
+    advanceDay() {
+        this.currentDay++;
+        this.weatherState = this.weatherGenerator.computeDay(
+            this.world, this.currentDay, this.weatherState
+        );
+        // Update day counter display
+        const dayCounter = document.getElementById('day-counter');
+        if (dayCounter) {
+            dayCounter.textContent = `Day ${this.currentDay} — ${this.weatherState.season}`;
+        }
+        if (this.viewer) {
+            this.viewer.render();
+        }
+    }
+
+    /**
+     * Get weather overlay data for the HUD
+     * @returns {{ active: boolean, day: number, season: string, stormCount: number }|null}
+     */
+    getWeatherOverlayData() {
+        if (!this.showWeather || !this.weatherState) return null;
+        return {
+            active: true,
+            day: this.weatherState.day,
+            season: this.weatherState.season,
+            stormCount: this.weatherState.storms.length
+        };
+    }
+
+    /**
      * Toggle distance measurement mode
      */
     toggleMeasureMode() {
@@ -445,7 +500,8 @@ class MapGenerator {
             getOverlayText: () => this.theme.getOverlayText(),
             onClick: (worldPos) => this.handleMapClick(worldPos),
             onHover: (worldPos) => this.handleMapHover(worldPos),
-            getMeasurementData: () => this.getMeasurementData()
+            getMeasurementData: () => this.getMeasurementData(),
+            getWeatherData: () => this.getWeatherOverlayData()
         });
 
         // Handle window resize
@@ -566,10 +622,47 @@ class MapGenerator {
             });
         }
 
+        // Setup weather toggle
+        const weatherToggle = document.getElementById('weather-toggle');
+        if (weatherToggle) {
+            weatherToggle.checked = this.showWeather;
+            weatherToggle.addEventListener('change', (e) => {
+                this.setShowWeather(e.target.checked);
+            });
+        }
+
+        // Setup next day button
+        const nextDayBtn = document.getElementById('next-day-btn');
+        if (nextDayBtn) {
+            nextDayBtn.addEventListener('click', () => {
+                this.advanceDay();
+            });
+        }
+
+        // Initialize day counter display
+        const dayCounter = document.getElementById('day-counter');
+        if (dayCounter && this.weatherState) {
+            dayCounter.textContent = `Day ${this.currentDay} — ${this.weatherState.season}`;
+        }
+
         // Escape key clears measurement
         document.addEventListener('keydown', (e) => {
             if (e.key === 'Escape' && (this.measureMode || this.measurePoints.length > 0)) {
                 this.clearMeasurement();
+            }
+            // N = next day
+            if (e.key === 'n' || e.key === 'N') {
+                if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+                    this.advanceDay();
+                }
+            }
+            // W = toggle weather
+            if (e.key === 'w' || e.key === 'W') {
+                if (!e.ctrlKey && !e.metaKey && !e.altKey) {
+                    const newVal = !this.showWeather;
+                    this.setShowWeather(newVal);
+                    if (weatherToggle) weatherToggle.checked = newVal;
+                }
             }
         });
 
@@ -626,6 +719,10 @@ class MapGenerator {
 
         // Generate roads (connect POIs with pathfinding)
         this.roadGenerator.generate(this.world);
+
+        // Initialize weather
+        this.weatherGenerator.initializeWindField(this.world);
+        this.weatherState = this.weatherGenerator.computeDay(this.world, this.currentDay, null);
 
         // Pre-build road type lookup for O(1) edge queries
         this.roadEdgeTypes = new Map();
@@ -702,6 +799,11 @@ class MapGenerator {
 
         // Draw tiles
         this.drawTiles(ctx, camera, viewportTiles);
+
+        // Draw weather overlay (between tiles and rivers)
+        if (this.showWeather && this.weatherState) {
+            this.weatherRenderer.drawWeatherOverlay(ctx, camera, this.weatherState, this.world, viewportTiles);
+        }
 
         // Draw rivers
         this.drawRivers(ctx, camera, level0Tiles);
