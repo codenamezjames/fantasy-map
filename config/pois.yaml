@@ -12,11 +12,28 @@ customPOIs:
     position: [1000, 400]
     size: large
     description: "Sacred temple to the moon goddess"
+  - name: "Thistlewood Ruins"
+    type: ruins
+    position: [1118, 772]
+    biome: temperate_forest
+    biomeRadius: 3
 
 # Rename or modify generated POIs
 # "match" finds the POI by its current name, then overrides any fields you specify
 replacePOIs:
   - match: "Mossgar"
     name: "Willowfen Village"
+    biome: temperate_forest
+    biomeRadius: 3
+  - match: "Longstead"
+    name: "Saltmere"
+    population: 40000
+  - match: "Littlerest"
     biome: marsh
     biomeRadius: 3
+  - match: "Woodbridge"
+    name: "Highspire"
+    type: capital
+    size: large
+    population: 50000
+    description: "Capital of the eastern continent"

@@ -39,6 +39,20 @@ const POI_COLORS = {
 };
 
 /**
+ * Bright icon colors for POI markers (separate from tile-blending palette)
+ */
+const POI_ICON_COLORS = {
+    village:  { fill: '#e8d5a3', stroke: '#3d2e1a' },   // Warm tan / dark brown
+    town:     { fill: '#dbb870', stroke: '#3d2e1a' },   // Gold-tan / dark brown
+    city:     { fill: '#f0e0b0', stroke: '#2a1f0f' },   // Parchment / near black
+    capital:  { fill: '#ffd700', stroke: '#2a1f0f' },   // Gold / near black
+    dungeon:  { fill: '#d94040', stroke: '#1a0505' },   // Red / dark
+    temple:   { fill: '#60b0e0', stroke: '#0a2a3d' },   // Bright blue / dark blue
+    ruins:    { fill: '#d4935a', stroke: '#2a1508' },   // Amber / dark brown
+    port:     { fill: '#50c0c0', stroke: '#0a2d2d' }    // Teal / dark teal
+};
+
+/**
  * Interpolate between two HSL colors
  */
 function lerpHSL(hsl1, hsl2, t) {
@@ -437,6 +451,20 @@ export class Theme {
         const color = POI_COLORS[type] || POI_COLORS.village;
         const stroke = color.stroke;
         return `hsl(${stroke.h}, ${stroke.s}%, ${stroke.l}%)`;
+    }
+
+    /**
+     * Get bright icon fill color for POI markers
+     */
+    getPOIIconFill(type) {
+        return (POI_ICON_COLORS[type] || POI_ICON_COLORS.village).fill;
+    }
+
+    /**
+     * Get dark icon stroke color for POI markers
+     */
+    getPOIIconStroke(type) {
+        return (POI_ICON_COLORS[type] || POI_ICON_COLORS.village).stroke;
     }
 
     /**

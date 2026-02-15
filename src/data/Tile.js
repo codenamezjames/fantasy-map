@@ -40,7 +40,7 @@ export class Tile {
 
         // Visibility (zoom percentage range)
         this.minZoom = config.minZoom ?? -50;
-        this.maxZoom = config.maxZoom ?? 40;
+        this.maxZoom = config.maxZoom ?? 100;
 
         // Hierarchical detail
         this.detailGenerated = config.detailGenerated ?? false;

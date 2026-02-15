@@ -563,7 +563,14 @@ class MapGenerator {
         }
 
         // Set zoom thresholds from config
-        this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
+        const thresholds = CONFIG.subtiles?.zoomThresholds || [0, 72, 101, 102];
+        this.world.setZoomThresholds(thresholds);
+
+        // Set level-0 tiles maxZoom so they hide when sub-tiles appear
+        const level0MaxZoom = thresholds[1] - 1;
+        for (const tile of this.world.getTilesAtLevel(0)) {
+            tile.maxZoom = level0MaxZoom;
+        }
 
         // Create tile load manager for hierarchical sub-tiles
         this.tileLoadManager = new TileLoadManager(
@@ -593,7 +600,7 @@ class MapGenerator {
             );
             // Store city in the cityMode state
             this.tileLoadManager.cityMode.city = city;
-            console.log(`Entered city mode: ${city.name}, streets: ${city.streets?.edges?.size ?? 0}`);
+            console.log(`Entered city mode: ${city.name}, streets: ${city.streets?.edges?.size ?? 0}, buildings: ${city.buildings?.length ?? 0}`);
         } else if (event.exiting) {
             console.log('Exited city mode');
         }
@@ -627,9 +634,17 @@ class MapGenerator {
         this.drawRoads(ctx, camera, level0Tiles);
 
         // Draw city streets and buildings when in city mode
-        if (this.tileLoadManager && this.tileLoadManager.isInCityMode()) {
-            this.drawCityStreets(ctx, camera);
-            this.drawCityBuildings(ctx, camera);
+        // Only render at Building zoom (75%+) with enough content to look like a real city
+        if (this.tileLoadManager && this.tileLoadManager.isInCityMode() && camera.zoom >= 75) {
+            const cs = this.tileLoadManager.getCityModeState();
+            const buildingCount = cs.city?.buildings?.length ?? 0;
+            const streetCount = cs.city?.streets?.edges?.size ?? 0;
+            // Require a minimum amount of generated content before rendering
+            // A city with <5 buildings or <10 streets looks like artifacts, not a city
+            if (buildingCount >= 5 && streetCount >= 10) {
+                this.drawCityStreets(ctx, camera);
+                this.drawCityBuildings(ctx, camera);
+            }
         }
 
         // Draw region borders and selection (if enabled)
@@ -866,13 +881,13 @@ class MapGenerator {
      * Draw a symbol for medium-distance POIs
      */
     drawPOISymbol(ctx, x, y, poi, camera, config) {
-        const size = (config.symbolSize || 8) / camera.scale;
-        const fillColor = this.theme.getPOIColor(poi.type);
-        const strokeColor = this.theme.getPOIStrokeColor(poi.type);
+        const size = (config.symbolSize || 20) / camera.scale;
+        const fillColor = this.theme.getPOIIconFill(poi.type);
+        const strokeColor = this.theme.getPOIIconStroke(poi.type);
 
         ctx.fillStyle = fillColor;
         ctx.strokeStyle = strokeColor;
-        ctx.lineWidth = 1.5 / camera.scale;
+        ctx.lineWidth = 2.5 / camera.scale;
 
         switch (poi.type) {
             case 'capital':
@@ -995,8 +1010,8 @@ class MapGenerator {
      * Draw POI label
      */
     drawPOILabel(ctx, x, y, poi, camera, config) {
-        const fontSize = Math.max(10, (config.labelOffset || 12) / camera.scale);
-        const offset = (config.symbolSize || 8) / camera.scale + 4 / camera.scale;
+        const fontSize = 14 / camera.scale;
+        const offset = (config.symbolSize || 20) / camera.scale + 4 / camera.scale;
 
         ctx.font = `${fontSize}px sans-serif`;
         ctx.textAlign = 'center';
@@ -1344,47 +1359,68 @@ class MapGenerator {
     }
 
     /**
-     * Draw roads connecting POIs
+     * Draw roads connecting POIs with smooth curves.
+     * Uses an off-screen canvas to prevent alpha stacking when roads overlap near POIs.
      */
     drawRoads(ctx, camera, tiles) {
         if (!this.world) return;
-
-        const drawnEdges = new Set();
 
         const config = CONFIG.roads?.rendering || {};
         const color = config.color || { h: 35, s: 30, l: 40 };
         const opacity = config.opacity || 0.7;
 
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        // Off-screen canvas: draw roads at full opacity, composite at desired opacity.
+        // This prevents alpha stacking where multiple roads share tiles near POIs.
+        const canvas = ctx.canvas;
+        if (!this._roadCanvas) {
+            this._roadCanvas = document.createElement('canvas');
+        }
+        if (this._roadCanvas.width !== canvas.width || this._roadCanvas.height !== canvas.height) {
+            this._roadCanvas.width = canvas.width;
+            this._roadCanvas.height = canvas.height;
+        }
+        const rctx = this._roadCanvas.getContext('2d');
+        rctx.setTransform(1, 0, 0, 1, 0, 0);
+        rctx.clearRect(0, 0, canvas.width, canvas.height);
+        rctx.setTransform(ctx.getTransform());
+        rctx.lineCap = 'round';
+        rctx.lineJoin = 'round';
 
-        // Group road edges by type for batch rendering
-        const roadSegments = { major: [], minor: [], path: [] };
-
+        // Build set of visible tile IDs for viewport filtering
+        const visibleTileIds = new Set();
         for (const tile of tiles) {
-            if (!tile.roadEdges || tile.roadEdges.length === 0) continue;
+            visibleTileIds.add(tile.id);
+        }
 
-            for (const neighborId of tile.roadEdges) {
-                const edgeKey = tile.id < neighborId
-                    ? `${tile.id}-${neighborId}`
-                    : `${neighborId}-${tile.id}`;
-                if (drawnEdges.has(edgeKey)) continue;
-                drawnEdges.add(edgeKey);
+        // Group roads by type, collecting full tile-center polylines
+        const roadPolylines = { major: [], minor: [], path: [] };
 
-                const neighbor = this.world.getTile(neighborId);
-                if (!neighbor) continue;
+        for (const road of this.world.getAllRoads()) {
+            const type = road.type || 'path';
+            const tileIds = road.tileIds;
+            if (!tileIds || tileIds.length < 2) continue;
 
-                // Determine road type from road metadata
-                const roadType = this.getRoadTypeForEdge(tile.id, neighborId);
+            // Check if any tile in this road is visible
+            let visible = false;
+            for (const id of tileIds) {
+                if (visibleTileIds.has(id)) {
+                    visible = true;
+                    break;
+                }
+            }
+            if (!visible) continue;
 
-                roadSegments[roadType].push({
-                    from: tile.center,
-                    to: neighbor.center
-                });
+            const points = [];
+            for (const id of tileIds) {
+                const tile = this.world.getTile(id);
+                if (tile) points.push(tile.center);
+            }
+            if (points.length >= 2) {
+                roadPolylines[type].push(points);
             }
         }
 
-        // Draw paths first (bottom), then minor, then major (top)
+        // Draw at full opacity on off-screen canvas (paths → minor → major, bottom to top)
         const widths = {
             path: config.pathWidth || 1,
             minor: config.minorWidth || 2,
@@ -1392,18 +1428,56 @@ class MapGenerator {
         };
 
         for (const type of ['path', 'minor', 'major']) {
-            if (roadSegments[type].length === 0) continue;
+            if (roadPolylines[type].length === 0) continue;
 
-            ctx.strokeStyle = `hsla(${color.h}, ${color.s}%, ${color.l}%, ${opacity})`;
-            ctx.lineWidth = widths[type] / camera.scale;
+            rctx.strokeStyle = `hsl(${color.h}, ${color.s}%, ${color.l}%)`;
+            rctx.lineWidth = widths[type] / camera.scale;
 
-            ctx.beginPath();
-            for (const seg of roadSegments[type]) {
-                ctx.moveTo(seg.from[0], seg.from[1]);
-                ctx.lineTo(seg.to[0], seg.to[1]);
+            rctx.beginPath();
+            for (const points of roadPolylines[type]) {
+                this.traceSmoothedPolyline(rctx, points);
             }
-            ctx.stroke();
+            rctx.stroke();
         }
+
+        // Composite onto main canvas at the desired opacity
+        ctx.save();
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.globalAlpha = opacity;
+        ctx.drawImage(this._roadCanvas, 0, 0);
+        ctx.restore();
+    }
+
+    /**
+     * Trace a smoothed polyline using quadratic Bezier curves through midpoints.
+     * For 2 points: straight line. For 3+: smooth curve via midpoint control points.
+     */
+    traceSmoothedPolyline(ctx, points) {
+        if (points.length === 2) {
+            ctx.moveTo(points[0][0], points[0][1]);
+            ctx.lineTo(points[1][0], points[1][1]);
+            return;
+        }
+
+        // Start at the first point
+        ctx.moveTo(points[0][0], points[0][1]);
+
+        // Line to the midpoint between first and second point
+        const midX = (points[0][0] + points[1][0]) / 2;
+        const midY = (points[0][1] + points[1][1]) / 2;
+        ctx.lineTo(midX, midY);
+
+        // For each interior point, draw a quadratic curve using the point as control
+        // and the midpoint to the next point as the end
+        for (let i = 1; i < points.length - 1; i++) {
+            const nextMidX = (points[i][0] + points[i + 1][0]) / 2;
+            const nextMidY = (points[i][1] + points[i + 1][1]) / 2;
+            ctx.quadraticCurveTo(points[i][0], points[i][1], nextMidX, nextMidY);
+        }
+
+        // Line to the last point
+        const last = points[points.length - 1];
+        ctx.lineTo(last[0], last[1]);
     }
 
     /**
@@ -1692,15 +1766,13 @@ class MapGenerator {
         }
         ctx.stroke();
 
-        // Coordinate labels - visibility thresholds:
-        // Major labels (500px) visible at 20%+ zoom
-        // Minor labels (100px) visible at 50%+ zoom
-        const showMajorLabels = camera.isVisibleAtZoom(20, 100);
-        const showMinorLabels = camera.isVisibleAtZoom(50, 100);
+        // Coordinate labels - hide at sub-tile zoom (72%+)
+        const showMajorLabels = camera.isVisibleAtZoom(20, 71);
+        const showMinorLabels = camera.isVisibleAtZoom(50, 71);
 
         if (showMajorLabels) {
             ctx.fillStyle = this.theme.getGridLabelColor();
-            const fontSize = Math.max(10, 12 / camera.scale);
+            const fontSize = 12 / camera.scale;
             ctx.font = `${fontSize}px monospace`;
 
             const labelStep = showMinorLabels ? 100 : 500;

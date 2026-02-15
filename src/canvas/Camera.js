@@ -22,7 +22,7 @@ export class Camera {
         this.minZoom = config.minZoom ?? -50;    // Minimum zoom % (negative = zoomed out)
         this.maxZoom = config.maxZoom ?? 100;    // Maximum zoom %
         this.minScale = config.minScale || 1;    // Scale at zoom 0%
-        this.maxScale = config.maxScale || 64;   // Scale at zoom 100%
+        this.maxScale = config.maxScale || 12;   // Scale at zoom 100%
         this.zoomStep = config.zoomStep || 1;    // % change per scroll tick
     }
 

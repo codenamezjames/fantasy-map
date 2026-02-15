@@ -30,9 +30,10 @@ export class BuildingGenerator {
             const block = streets.getFacePolygon(faceNodes);
             if (block.length < 3) continue;
 
-            // Skip blocks that are too small
+            // Skip blocks that are too small or too large
             const area = this.calculatePolygonArea(block);
             if (area < 100) continue;
+            if (area > 3000) continue; // Oversized face — likely outer boundary artifact
 
             // Get block bounds and inset by street margin
             const insetBlock = this.insetPolygon(block, this.streetMargin);

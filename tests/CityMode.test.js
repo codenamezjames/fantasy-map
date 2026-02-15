@@ -278,28 +278,28 @@ async function runTests() {
         const manager = new TileLoadManager(mockWorld, new MockSubTileGenerator(), { seed: 'test-seed' });
 
         describe('.getCityModeThreshold()', () => {
-            test('returns 55 for capital', () => {
-                expect(manager.getCityModeThreshold('capital')).toBe(55);
+            test('returns 75 for capital', () => {
+                expect(manager.getCityModeThreshold('capital')).toBe(75);
             });
 
-            test('returns 60 for city', () => {
-                expect(manager.getCityModeThreshold('city')).toBe(60);
+            test('returns 75 for city', () => {
+                expect(manager.getCityModeThreshold('city')).toBe(75);
             });
 
-            test('returns 65 for town', () => {
-                expect(manager.getCityModeThreshold('town')).toBe(65);
+            test('returns 78 for town', () => {
+                expect(manager.getCityModeThreshold('town')).toBe(78);
             });
 
-            test('returns 70 for village', () => {
-                expect(manager.getCityModeThreshold('village')).toBe(70);
+            test('returns 80 for village', () => {
+                expect(manager.getCityModeThreshold('village')).toBe(80);
             });
 
-            test('returns 60 for port', () => {
-                expect(manager.getCityModeThreshold('port')).toBe(60);
+            test('returns 75 for port', () => {
+                expect(manager.getCityModeThreshold('port')).toBe(75);
             });
 
-            test('returns default (65) for unknown type', () => {
-                expect(manager.getCityModeThreshold('unknown')).toBe(65);
+            test('returns default (78) for unknown type', () => {
+                expect(manager.getCityModeThreshold('unknown')).toBe(78);
             });
         });
 
@@ -367,13 +367,13 @@ async function runTests() {
                 const viewport = { minX: 450, minY: 450, maxX: 550, maxY: 550 };
                 expect(manager.isInCityMode()).toBeFalsy();
 
-                manager.checkCityMode(viewport, 70); // Above town threshold of 65
+                manager.checkCityMode(viewport, 80); // Above town threshold of 78
                 expect(manager.isInCityMode()).toBeTruthy();
             });
 
             test('exits city mode when zoom below threshold', () => {
                 const viewport = { minX: 450, minY: 450, maxX: 550, maxY: 550 };
-                manager.checkCityMode(viewport, 70);
+                manager.checkCityMode(viewport, 80);
                 expect(manager.isInCityMode()).toBeTruthy();
 
                 manager.checkCityMode(viewport, 50); // Below threshold
@@ -824,7 +824,7 @@ async function runTests() {
 
             // Step 2: Check threshold
             const threshold = manager.getCityModeThreshold(settlement.type);
-            expect(threshold).toBe(65); // town
+            expect(threshold).toBe(78); // town
 
             // Step 3: Generate city
             const city = cityGenerator.generate(settlement, mockWorld, 'integration-test');

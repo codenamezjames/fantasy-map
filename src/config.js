@@ -46,7 +46,7 @@ export const CONFIG = {
         maxLoadedParents: 50,       // Max parents with loaded children (memory limit)
         minParentArea: 10,          // Minimum parent tile area to subdivide
         // Zoom thresholds for each level (zoom % where level starts)
-        zoomThresholds: [0, 40, 60, 80]  // World at 0%, Area at 40%, City at 60%, Building at 80%
+        zoomThresholds: [0, 72, 101, 102]  // Area at 72% (~6x); City/Building disabled until deeper zoom is ready
     },
 
     // Points of Interest

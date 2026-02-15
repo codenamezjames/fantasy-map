@@ -54,14 +54,6 @@ export class CanvasViewer {
         this.needsRender = false;
         this.renderScheduled = false;
 
-        // FPS tracking
-        this._fpsFrames = 0;
-        this._fpsLastTime = performance.now();
-        this._fps = 0;
-        this._frameTime = 0;
-
-        // Periodic overlay refresh so FPS decays to 0 when idle
-        this._fpsInterval = setInterval(() => this._updateFps(), 500);
 
         // Bind event handlers
         this.setupEventListeners();
@@ -285,9 +277,6 @@ export class CanvasViewer {
         // Restore context state
         ctx.restore();
 
-        // Track frame for FPS counter
-        this._frameTime = performance.now() - frameStart;
-        this._fpsFrames++;
 
         // Draw UI overlay (zoom level, etc.)
         this.drawOverlay();
@@ -346,23 +335,6 @@ export class CanvasViewer {
         ctx.fill();
     }
 
-    /**
-     * Periodic FPS update — computes fps from recent frame count
-     * and repaints overlay so the counter stays fresh when idle
-     */
-    _updateFps() {
-        const now = performance.now();
-        const elapsed = now - this._fpsLastTime;
-        this._fps = Math.round((this._fpsFrames * 1000) / elapsed);
-        if (this._fpsFrames === 0) this._frameTime = 0;
-        this._fpsFrames = 0;
-        this._fpsLastTime = now;
-
-        // Repaint just the overlay region (no full world re-render)
-        const { ctx } = this;
-        ctx.clearRect(10, 10, 160, 112);
-        this.drawOverlay();
-    }
 
     /**
      * Draw UI overlay (not affected by camera transform)
@@ -373,7 +345,7 @@ export class CanvasViewer {
         const overlayText = this.getOverlayText();
 
         // Overlay height depends on whether we have a click position
-        const overlayH = this.lastClickPos ? 112 : 96;
+        const overlayH = this.lastClickPos ? 94 : 78;
 
         // Zoom level indicator
         ctx.fillStyle = overlayBg;
@@ -390,24 +362,18 @@ export class CanvasViewer {
         ctx.fillText(`View: ${Math.round(vp.x)},${Math.round(vp.y)}`, 20, 68);
         ctx.globalAlpha = 1;
 
-        // FPS indicator
-        const fpsColor = this._fps >= 50 ? '#4ade80' : this._fps >= 30 ? '#facc15' : '#f87171';
-        ctx.fillStyle = fpsColor;
-        ctx.font = '12px monospace';
-        ctx.fillText(`${this._fps} fps  ${this._frameTime.toFixed(1)}ms`, 20, 84);
-
         // Zoom bar
         ctx.globalAlpha = 0.2;
-        ctx.fillRect(20, 90, 130, 4);
+        ctx.fillRect(20, 74, 130, 4);
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#4a9eff';
-        ctx.fillRect(20, 90, (camera.zoom / 100) * 130, 4);
+        ctx.fillRect(20, 74, (camera.zoom / 100) * 130, 4);
 
         // Clicked position
         if (this.lastClickPos) {
             ctx.fillStyle = '#e0e0e0';
             ctx.font = '12px monospace';
-            ctx.fillText(`Click: ${Math.round(this.lastClickPos.x)}, ${Math.round(this.lastClickPos.y)}`, 20, 110);
+            ctx.fillText(`Click: ${Math.round(this.lastClickPos.x)}, ${Math.round(this.lastClickPos.y)}`, 20, 92);
         }
 
         // Distance scale bar (bottom-right) — 1 world unit = 0.5 miles

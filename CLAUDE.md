@@ -1,76 +1,63 @@
-# Fantasy Map Generator
+# CLAUDE.md
 
-A procedural fantasy map generator using Voronoi diagrams, built with Vanilla JavaScript.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Tech Stack
+## Project Overview
 
-- Vanilla JavaScript (ES6+ modules)
-- HTML5 Canvas (for map rendering)
-- CSS3
-
-## Dependencies
-
-- `d3-delaunay` - Voronoi diagram generation
-- `seedrandom` - Seeded random number generation for reproducible worlds
-- `simplex-noise` - Terrain noise generation (elevation, moisture)
+Fantasy Map Generator — a browser-based procedural world generation tool for tabletop campaigns. Generates terrain, biomes, rivers, POIs, regions, roads, and cities with hierarchical zoom (4 levels). Built with vanilla ES6 modules, Canvas 2D rendering, and Vite.
 
 ## Commands
 
 ```bash
-# Install dependencies
-npm install
-
-# Open index.html in browser to run
-# (No build step required - uses ES modules directly)
+npm start              # Vite dev server on :8765
+npm run build          # Production build to dist/
+npm test               # Runs tests/CityMode.test.js
+node tests/<file>.js   # Run a single test file
 ```
 
-## Project Structure
-
-```
-fanticy-map-generator/
-├── index.html              # Main HTML entry point
-├── src/
-│   ├── main.js             # Application entry point
-│   ├── canvas/             # Canvas viewer (pan/zoom)
-│   ├── generation/         # World generation algorithms
-│   ├── data/               # Tile/POI data structures
-│   └── utils/
-│       ├── random.js       # Seeded random wrapper
-│       └── noise.js        # Simplex noise wrapper
-├── styles/
-│   └── main.css            # Styles
-├── assets/                 # Textures, icons (future)
-├── package.json
-└── CLAUDE.md
-```
+Tests use a custom framework (no test runner dependency) — each test file is a standalone Node script with `test()`, `describe()`, `expect()` functions defined inline.
 
 ## Architecture
 
-### Tile Structure
-Each Voronoi cell is a tile with: id, parentId, zoomLevel, biome, elevation, moisture, temperature, terrain, isWater, waterDepth, riverEdges, isCoastal, regionId, neighbors, roadEdges, center, vertices, detailGenerated, traversability
+### Generation Pipeline
 
-### Zoom Levels
-0. World view - continental scale
-1. Area view - regional scale
-2. City view - local scale
-3. Building/Dungeon view - detail scale
+`MapGenerator` (src/main.js) orchestrates generation in this fixed order:
 
-### Generation Order
-1. Voronoi cells from seeded points
-2. Elevation via Perlin/Simplex noise
-3. Temperature (latitude + elevation)
-4. Moisture (Perlin layer)
-5. Biomes (lookup from elevation/temp/moisture)
-6. Water features (rivers flow downhill, lakes in bowls)
-7. POIs and settlements
-8. Regions (grow from capitals)
-9. Roads (connect POIs)
+1. **VoronoiGenerator** — Delaunay triangulation → Voronoi cells → Lloyd's relaxation (~15k tiles)
+2. **ElevationGenerator** — Multi-octave simplex noise (continental + mountain + detail layers)
+3. **TemperatureGenerator** — Latitude-based + elevation penalty + noise
+4. **MoistureGenerator** — Multi-octave noise for precipitation
+5. **BiomeGenerator** — Whittaker diagram lookup (temperature × moisture → 13 biomes)
+6. **WaterGenerator** — Downhill flow, bowl detection → lakes, overflow continuation
+7. **POIGenerator** — Settlement/dungeon/temple placement with biome preferences and spacing
+8. **RegionGenerator** — Kingdom borders grown outward from capitals
+9. **RoadGenerator** — A* pathfinding between POIs with terrain-weighted costs
 
-## Debugging
+City generation (CityGenerator → StreetGenerator → BuildingGenerator) triggers on-demand when zooming into a settlement.
 
-Access generator in browser console:
-```js
-window.mapGenerator
-window.mapGenerator.rng      // Seeded random
-window.mapGenerator.noise    // Noise generator
-```
+### Key Design Patterns
+
+**Seeded determinism:** Every generator receives a separate `SeededRandom` instance (seedrandom library). Same seed = same world. Never use `Math.random()`.
+
+**Edge-based features:** Rivers and roads are stored as shared edges between adjacent tiles — both tiles must agree on the edge. The tile with the lower ID decides.
+
+**Hierarchical zoom:** 4 levels (Overview → World → Area → City/Building). `SubTileGenerator` creates child tiles on-demand; `TileLoadManager` evicts via LRU (max 50 loaded parents). Tiles have `minZoom`/`maxZoom` for LOD visibility.
+
+**Viewport rendering:** Only tiles/POIs within the current viewport are drawn. `World.getTilesInViewport()` and `World.getPOIsInViewport()` handle spatial filtering.
+
+### Module Layout
+
+- `src/data/` — Data models: `World` (spatial container), `Tile` (Voronoi cell), `POI`, `City`, `Building`, `StreetNetwork` (graph: nodes + edges)
+- `src/generation/` — All procedural generators (executed in pipeline order above)
+- `src/canvas/` — `Camera` (pan/zoom transforms, 4 zoom levels), `CanvasViewer` (Canvas 2D events, inertia scrolling, render loop)
+- `src/rendering/` — `Theme` (biome color palettes, hillshading)
+- `src/utils/` — `random.js` (seeded RNG), `noise.js` (simplex), `polygon.js` (geometry), `ConfigLoader.js` (YAML config)
+- `src/config.js` — Central CONFIG object with all tunable parameters
+
+### Configuration System
+
+`config/index.yaml` can import other YAML files (e.g., `pois.yaml` for custom POI definitions). `ConfigLoader` deep-merges YAML overrides on top of defaults from `src/config.js`. Users can also upload config files through the UI.
+
+### Rendering Order (in renderWorld)
+
+Tiles (with optional gradient blending) → Rivers (3-pass: glow/blend/core) → Roads (paths → minor → major) → City streets/buildings → Region borders → POIs (zoom-aware: dots → symbols → labels) → Grid overlay → World boundary.

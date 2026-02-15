@@ -10,11 +10,11 @@ const SETTLEMENT_TYPES = ['village', 'town', 'city', 'capital', 'port'];
  * Lower value = enter city mode earlier (at lower zoom)
  */
 const CITY_MODE_THRESHOLDS = {
-    capital: 55,
-    city: 60,
-    town: 65,
-    village: 70,
-    port: 60
+    capital: 75,
+    city: 75,
+    town: 78,
+    village: 80,
+    port: 75
 };
 
 /**

@@ -614,7 +614,8 @@ export class StreetNetwork {
 
     /**
      * Trace a face starting from a directed edge
-     * Uses the "next edge in CCW order" rule for planar graphs
+     * Uses the "next edge in CW order" rule for finding interior faces
+     * When at a node, we turn right (CW) to stay inside the face
      * @private
      */
     _traceFace(startNode, nextNode, adjacency, usedHalfEdges) {
@@ -626,6 +627,11 @@ export class StreetNetwork {
 
         while (iterations < maxIterations) {
             const halfEdgeKey = `${current}->${next}`;
+
+            // Check if already used - if so, stop tracing
+            if (usedHalfEdges.has(halfEdgeKey)) {
+                return null;
+            }
 
             // Mark this half-edge as used
             usedHalfEdges.add(halfEdgeKey);
@@ -639,21 +645,23 @@ export class StreetNetwork {
                 return face;
             }
 
-            // Find the next edge: the one that comes after the reverse edge in CCW order
+            // Find the next edge: turn right (clockwise) from incoming direction
+            // This ensures we trace the minimal face (city block)
             const neighbors = adjacency.get(next);
             if (!neighbors || neighbors.length === 0) {
                 return null;
             }
 
-            // Find index of current in next's neighbor list
+            // Find index of current (where we came from) in next's neighbor list
             const prevIndex = neighbors.indexOf(current);
             if (prevIndex === -1) {
                 return null;
             }
 
-            // Next neighbor in CCW order (wrap around)
-            // We take the next edge counter-clockwise from where we came from
-            const nextIndex = (prevIndex + 1) % neighbors.length;
+            // For interior faces, we turn right (CW), which means going backwards
+            // in the CCW-sorted neighbor list (subtract 1 and wrap)
+            // This ensures we trace the minimal cycle enclosing the interior
+            const nextIndex = (prevIndex - 1 + neighbors.length) % neighbors.length;
 
             current = next;
             next = neighbors[nextIndex];
@@ -687,8 +695,14 @@ export class StreetNetwork {
         }
 
         // Negative signed area indicates clockwise winding (outer boundary)
-        // We also check if it's significantly larger than typical blocks
-        return signedArea < 0;
+        if (signedArea < 0) return true;
+
+        // Also reject oversized faces that slipped through winding check
+        // These are likely semi-enclosed regions or boundary artifacts
+        const absArea = Math.abs(signedArea / 2);
+        if (absArea > 4000) return true;
+
+        return false;
     }
 
     /**

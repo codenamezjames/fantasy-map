@@ -227,7 +227,7 @@ export class RoadGenerator {
      * Heuristic for A* (Euclidean distance with slight underestimate)
      */
     heuristic(tile, target) {
-        return this.distance(tile.center, target.center) * 0.5;
+        return this.distance(tile.center, target.center) * 0.9;
     }
 
     /**
@@ -255,6 +255,11 @@ export class RoadGenerator {
         // River crossing penalty
         if (from.riverEdges?.includes(to.id)) {
             cost += this.costs.riverCrossing;
+        }
+
+        // Coastal avoidance — discourage routes that hug water boundaries
+        if (to.isCoastal) {
+            cost += 2;
         }
 
         // Bonus for existing roads (encourages road merging)
