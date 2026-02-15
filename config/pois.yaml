@@ -27,6 +27,7 @@ replacePOIs:
     biomeRadius: 3
   - match: "Longstead"
     name: "Saltmere"
+    size: large
     population: 40000
   - match: "Littlerest"
     biome: marsh
