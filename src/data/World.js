@@ -443,11 +443,20 @@ export class World {
      * @returns {Tile|null} Tile at that position
      */
     getTileAtPosition(x, y) {
-        // Check level 0 tiles (base tiles)
-        for (const tile of this.tiles.values()) {
-            if (tile.zoomLevel !== 0) continue;
-            if (this.pointInTile(x, y, tile)) {
-                return tile;
+        // Use spatial grid for fast lookup
+        const col = Math.floor(x / this._gridCellSize);
+        const row = Math.floor(y / this._gridCellSize);
+        if (col < 0 || col >= this._gridCols || row < 0 || row >= this._gridRows) {
+            return null;
+        }
+        const cell = this._grid[row * this._gridCols + col];
+        if (cell) {
+            for (const tileId of cell) {
+                const tile = this.tiles.get(tileId);
+                if (!tile || tile.zoomLevel !== 0) continue;
+                if (this.pointInTile(x, y, tile)) {
+                    return tile;
+                }
             }
         }
         return null;

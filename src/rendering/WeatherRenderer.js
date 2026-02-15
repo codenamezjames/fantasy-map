@@ -24,17 +24,25 @@ export class WeatherRenderer {
 
         ctx.save();
 
-        // 1. Cloud cover
-        this.drawCloudCover(ctx, camera, weatherState, tiles);
+        const zoom = camera.zoom;
 
-        // 2. Precipitation (rain/snow)
-        this.drawPrecipitation(ctx, camera, weatherState, world, tiles);
-
-        // 3. Wind arrows (sampled grid)
-        this.drawWindArrows(ctx, camera, weatherState, world);
-
-        // 4. Storm markers
-        this.drawStormMarkers(ctx, camera, weatherState);
+        // Zoom-based LOD: skip expensive per-tile effects when zoomed out
+        if (zoom >= 25) {
+            // Full detail
+            this.drawCloudCover(ctx, camera, weatherState, tiles);
+            this.drawPrecipitation(ctx, camera, weatherState, world, tiles);
+            this.drawWindArrows(ctx, camera, weatherState, world);
+            this.drawStormMarkers(ctx, camera, weatherState);
+        } else if (zoom >= 10) {
+            // Medium: clouds + wind arrows (sparser) + simplified storms
+            this.drawCloudCover(ctx, camera, weatherState, tiles);
+            this.drawWindArrows(ctx, camera, weatherState, world, 2);
+            this.drawStormMarkersSimple(ctx, camera, weatherState);
+        } else {
+            // Overview: only simplified storms + sparse wind arrows
+            this.drawWindArrows(ctx, camera, weatherState, world, 3);
+            this.drawStormMarkersSimple(ctx, camera, weatherState);
+        }
 
         ctx.restore();
     }
@@ -82,6 +90,14 @@ export class WeatherRenderer {
      */
     drawPrecipitation(ctx, camera, weatherState, world, tiles) {
         const lineWidth = 1 / camera.scale;
+        const rainColor = this.theme.getWeatherPrecipColor(false);
+        const snowColor = this.theme.getWeatherPrecipColor(true);
+
+        // Batch all rain streaks into one path, all snow dots into another
+        const rainPath = new Path2D();
+        const snowDots = []; // [cx, cy, r]
+        let hasRain = false;
+        let hasSnow = false;
 
         for (const tile of tiles) {
             const id = tile.id;
@@ -91,57 +107,64 @@ export class WeatherRenderer {
             const precip = weatherState.precipitation[id];
             if (precip < 0.15) continue;
 
-            const isSnow = weatherState.effectiveTemp[id] < 0.25;
-            ctx.fillStyle = this.theme.getWeatherPrecipColor(isSnow);
-            ctx.strokeStyle = this.theme.getWeatherPrecipColor(isSnow);
-            ctx.lineWidth = lineWidth;
-
-            const [cx, cy] = tile.center;
-            // Number of marks scales with intensity (fewer, more selective)
             const count = Math.floor(precip * 3);
             if (count < 1) continue;
 
-            // Use tile ID as seed for deterministic positions
+            const [cx, cy] = tile.center;
             const seed = id * 7919 + weatherState.day * 31;
+            const isSnow = weatherState.effectiveTemp[id] < 0.25;
 
             if (isSnow) {
-                // Snow: small dots
+                hasSnow = true;
+                const r = (1.2 + precip * 0.8) / camera.scale;
                 for (let i = 0; i < count; i++) {
                     const hash = (seed + i * 1301) % 10000;
                     const ox = ((hash % 100) / 100 - 0.5) * 16;
                     const oy = (((hash / 100) | 0) % 100 / 100 - 0.5) * 16;
-                    const r = (1.2 + precip * 0.8) / camera.scale;
-                    ctx.beginPath();
-                    ctx.arc(cx + ox, cy + oy, r, 0, Math.PI * 2);
-                    ctx.fill();
+                    snowDots.push(cx + ox, cy + oy, r);
                 }
             } else {
-                // Rain: short angled streaks
+                hasRain = true;
                 const windX = weatherState.windDirX[id] || 0;
                 const windY = weatherState.windDirY[id] || 0.5;
                 const streakLen = (4 + precip * 4) / camera.scale;
 
-                ctx.beginPath();
                 for (let i = 0; i < count; i++) {
                     const hash = (seed + i * 1301) % 10000;
                     const ox = ((hash % 100) / 100 - 0.5) * 16;
                     const oy = (((hash / 100) | 0) % 100 / 100 - 0.5) * 16;
                     const sx = cx + ox;
                     const sy = cy + oy;
-                    ctx.moveTo(sx, sy);
-                    ctx.lineTo(sx + windX * streakLen, sy + (windY * 0.3 + 0.7) * streakLen);
+                    rainPath.moveTo(sx, sy);
+                    rainPath.lineTo(sx + windX * streakLen, sy + (windY * 0.3 + 0.7) * streakLen);
                 }
-                ctx.stroke();
             }
+        }
+
+        if (hasRain) {
+            ctx.strokeStyle = rainColor;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke(rainPath);
+        }
+
+        if (hasSnow) {
+            ctx.fillStyle = snowColor;
+            ctx.beginPath();
+            for (let i = 0; i < snowDots.length; i += 3) {
+                ctx.moveTo(snowDots[i] + snowDots[i + 2], snowDots[i + 1]);
+                ctx.arc(snowDots[i], snowDots[i + 1], snowDots[i + 2], 0, Math.PI * 2);
+            }
+            ctx.fill();
         }
     }
 
     /**
      * Draw wind direction arrows on a regular grid
+     * @param {number} spacingMult - Multiplier for arrow spacing (higher = sparser)
      */
-    drawWindArrows(ctx, camera, weatherState, world) {
+    drawWindArrows(ctx, camera, weatherState, world, spacingMult = 1) {
         const cfg = CONFIG.weather?.rendering || {};
-        const spacing = cfg.windArrowSpacing || 80;
+        const spacing = (cfg.windArrowSpacing || 80) * spacingMult;
         const arrowSize = (cfg.windArrowSize || 12) / camera.scale;
 
         const viewport = camera.getViewport();
@@ -151,12 +174,12 @@ export class WeatherRenderer {
         const endY = Math.ceil(viewport.maxY / spacing) * spacing;
 
         ctx.strokeStyle = this.theme.getWeatherWindColor();
-        ctx.fillStyle = this.theme.getWeatherWindColor();
         ctx.lineWidth = 1.5 / camera.scale;
 
+        // Batch all arrows into a single path for fewer draw calls
+        ctx.beginPath();
         for (let x = startX; x <= endX; x += spacing) {
             for (let y = startY; y <= endY; y += spacing) {
-                // Find nearest tile to this grid point
                 const tile = world.getTileAtPosition(x, y);
                 if (!tile || tile.id >= weatherState.tileCount) continue;
                 if (tile.isWater) continue;
@@ -167,35 +190,29 @@ export class WeatherRenderer {
                 if (speed < 0.1) continue;
 
                 const len = arrowSize * (0.5 + speed);
-
-                // Arrow shaft
                 const ex = x + wx * len;
                 const ey = y + wy * len;
 
-                ctx.beginPath();
+                // Shaft
                 ctx.moveTo(x, y);
                 ctx.lineTo(ex, ey);
-                ctx.stroke();
 
                 // Arrowhead
                 const headLen = len * 0.3;
                 const angle = Math.atan2(wy, wx);
-                const headAngle = 0.5;
-
-                ctx.beginPath();
                 ctx.moveTo(ex, ey);
                 ctx.lineTo(
-                    ex - Math.cos(angle - headAngle) * headLen,
-                    ey - Math.sin(angle - headAngle) * headLen
+                    ex - Math.cos(angle - 0.5) * headLen,
+                    ey - Math.sin(angle - 0.5) * headLen
                 );
                 ctx.moveTo(ex, ey);
                 ctx.lineTo(
-                    ex - Math.cos(angle + headAngle) * headLen,
-                    ey - Math.sin(angle + headAngle) * headLen
+                    ex - Math.cos(angle + 0.5) * headLen,
+                    ey - Math.sin(angle + 0.5) * headLen
                 );
-                ctx.stroke();
             }
         }
+        ctx.stroke();
     }
 
     /**
@@ -203,7 +220,13 @@ export class WeatherRenderer {
      * Uses scattered semi-transparent blobs instead of crisp geometric lines
      */
     drawStormMarkers(ctx, camera, weatherState) {
+        const viewport = camera.getViewport();
         for (const storm of weatherState.storms) {
+            // Skip storms entirely outside viewport
+            const [sx0, sy0] = storm.position;
+            const sr = storm.radius;
+            if (sx0 + sr < viewport.minX || sx0 - sr > viewport.maxX ||
+                sy0 + sr < viewport.minY || sy0 - sr > viewport.maxY) continue;
             const [sx, sy] = storm.position;
             const r = storm.radius;
             const intensity = storm.intensity;
@@ -328,6 +351,64 @@ export class WeatherRenderer {
                 ctx.arc(bx, by, blobSize, 0, Math.PI * 2);
                 ctx.fill();
             }
+        }
+    }
+
+    /**
+     * Lightweight storm rendering for zoomed-out views.
+     * Single radial gradient + dashed concentric rings (no blobs).
+     */
+    drawStormMarkersSimple(ctx, camera, weatherState) {
+        const isDark = this.theme.isDark();
+        const viewport = camera.getViewport();
+
+        for (const storm of weatherState.storms) {
+            // Skip storms entirely outside viewport
+            const [sx0, sy0] = storm.position;
+            const sr = storm.radius;
+            if (sx0 + sr < viewport.minX || sx0 - sr > viewport.maxX ||
+                sy0 + sr < viewport.minY || sy0 - sr > viewport.maxY) continue;
+            const [sx, sy] = storm.position;
+            const r = storm.radius;
+            const intensity = storm.intensity;
+            const life = storm.maxLifetime
+                ? Math.min(1, storm.lifetime / storm.maxLifetime)
+                : 1;
+
+            // Type-specific color
+            let cR, cG, cB;
+            if (storm.type === 'blizzard') {
+                cR = 200; cG = 210; cB = 230;
+            } else if (storm.type === 'thunderstorm') {
+                cR = 80; cG = 85; cB = 105;
+            } else {
+                cR = 160; cG = 170; cB = 190;
+            }
+
+            // Single radial gradient fill
+            const alpha = (0.12 + intensity * 0.12) * life;
+            const grad = ctx.createRadialGradient(sx, sy, 0, sx, sy, r);
+            grad.addColorStop(0, `rgba(${cR}, ${cG}, ${cB}, ${(alpha * 1.2).toFixed(3)})`);
+            grad.addColorStop(0.5, `rgba(${cR}, ${cG}, ${cB}, ${(alpha * 0.6).toFixed(3)})`);
+            grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(sx, sy, r, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Dashed concentric rings
+            const ringColor = isDark
+                ? `rgba(180, 200, 230, ${(0.12 * life).toFixed(3)})`
+                : `rgba(80, 100, 140, ${(0.12 * life).toFixed(3)})`;
+            ctx.strokeStyle = ringColor;
+            ctx.lineWidth = 1 / camera.scale;
+            ctx.setLineDash([5 / camera.scale, 6 / camera.scale]);
+            for (let i = 1; i <= 4; i++) {
+                ctx.beginPath();
+                ctx.arc(sx, sy, r * i * 0.95 / 4, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.setLineDash([]);
         }
     }
 }
