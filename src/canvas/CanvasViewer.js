@@ -47,9 +47,21 @@ export class CanvasViewer {
         this.dragStartY = 0;
         this.clickThreshold = 5; // Max pixels moved to count as click
 
+        // Last clicked world position
+        this.lastClickPos = null;
+
         // Animation frame throttling for smooth rendering
         this.needsRender = false;
         this.renderScheduled = false;
+
+        // FPS tracking
+        this._fpsFrames = 0;
+        this._fpsLastTime = performance.now();
+        this._fps = 0;
+        this._frameTime = 0;
+
+        // Periodic overlay refresh so FPS decays to 0 when idle
+        this._fpsInterval = setInterval(() => this._updateFps(), 500);
 
         // Bind event handlers
         this.setupEventListeners();
@@ -179,13 +191,15 @@ export class CanvasViewer {
 
             if (wasDragging && dragDistance < this.clickThreshold) {
                 // This was a click, not a drag
+                const rect = canvas.getBoundingClientRect();
+                const screenX = e.clientX - rect.left;
+                const screenY = e.clientY - rect.top;
+                const worldPos = this.camera.screenToWorld(screenX, screenY);
+                this.lastClickPos = worldPos;
                 if (this.onClick) {
-                    const rect = canvas.getBoundingClientRect();
-                    const screenX = e.clientX - rect.left;
-                    const screenY = e.clientY - rect.top;
-                    const worldPos = this.camera.screenToWorld(screenX, screenY);
                     this.onClick(worldPos, { screenX, screenY });
                 }
+                this.scheduleRender();
                 return; // Don't start inertia for clicks
             }
 
@@ -246,6 +260,7 @@ export class CanvasViewer {
      * Render the canvas
      */
     render() {
+        const frameStart = performance.now();
         const { ctx, canvas, camera } = this;
 
         // Clear canvas
@@ -269,6 +284,10 @@ export class CanvasViewer {
 
         // Restore context state
         ctx.restore();
+
+        // Track frame for FPS counter
+        this._frameTime = performance.now() - frameStart;
+        this._fpsFrames++;
 
         // Draw UI overlay (zoom level, etc.)
         this.drawOverlay();
@@ -328,6 +347,24 @@ export class CanvasViewer {
     }
 
     /**
+     * Periodic FPS update — computes fps from recent frame count
+     * and repaints overlay so the counter stays fresh when idle
+     */
+    _updateFps() {
+        const now = performance.now();
+        const elapsed = now - this._fpsLastTime;
+        this._fps = Math.round((this._fpsFrames * 1000) / elapsed);
+        if (this._fpsFrames === 0) this._frameTime = 0;
+        this._fpsFrames = 0;
+        this._fpsLastTime = now;
+
+        // Repaint just the overlay region (no full world re-render)
+        const { ctx } = this;
+        ctx.clearRect(10, 10, 160, 112);
+        this.drawOverlay();
+    }
+
+    /**
      * Draw UI overlay (not affected by camera transform)
      */
     drawOverlay() {
@@ -335,9 +372,12 @@ export class CanvasViewer {
         const overlayBg = this.getOverlayBackground();
         const overlayText = this.getOverlayText();
 
+        // Overlay height depends on whether we have a click position
+        const overlayH = this.lastClickPos ? 112 : 96;
+
         // Zoom level indicator
         ctx.fillStyle = overlayBg;
-        ctx.fillRect(10, 10, 160, 80);
+        ctx.fillRect(10, 10, 160, overlayH);
 
         ctx.fillStyle = overlayText;
         ctx.font = '14px monospace';
@@ -350,12 +390,87 @@ export class CanvasViewer {
         ctx.fillText(`View: ${Math.round(vp.x)},${Math.round(vp.y)}`, 20, 68);
         ctx.globalAlpha = 1;
 
+        // FPS indicator
+        const fpsColor = this._fps >= 50 ? '#4ade80' : this._fps >= 30 ? '#facc15' : '#f87171';
+        ctx.fillStyle = fpsColor;
+        ctx.font = '12px monospace';
+        ctx.fillText(`${this._fps} fps  ${this._frameTime.toFixed(1)}ms`, 20, 84);
+
         // Zoom bar
         ctx.globalAlpha = 0.2;
-        ctx.fillRect(20, 78, 130, 4);
+        ctx.fillRect(20, 90, 130, 4);
         ctx.globalAlpha = 1;
         ctx.fillStyle = '#4a9eff';
-        ctx.fillRect(20, 78, (camera.zoom / 100) * 130, 4);
+        ctx.fillRect(20, 90, (camera.zoom / 100) * 130, 4);
+
+        // Clicked position
+        if (this.lastClickPos) {
+            ctx.fillStyle = '#e0e0e0';
+            ctx.font = '12px monospace';
+            ctx.fillText(`Click: ${Math.round(this.lastClickPos.x)}, ${Math.round(this.lastClickPos.y)}`, 20, 110);
+        }
+
+        // Distance scale bar (bottom-right) — 1 world unit = 0.5 miles
+        this.drawScaleBar(ctx, camera);
+    }
+
+    /**
+     * Draw a map scale bar in the bottom-right corner
+     * 1 world unit = 0.5 miles
+     */
+    drawScaleBar(ctx, camera) {
+        const milesPerUnit = 0.5;
+        // Nice round distances to pick from
+        const steps = [0.5, 1, 2, 5, 10, 25, 50, 100, 250, 500];
+        const targetBarPx = 120; // aim for ~120px wide bar
+
+        // How many world units fit in targetBarPx at current scale
+        const worldUnitsInBar = targetBarPx / camera.scale;
+        const milesInBar = worldUnitsInBar * milesPerUnit;
+
+        // Pick the largest nice step that fits
+        let niceMiles = steps[0];
+        for (const s of steps) {
+            if (s <= milesInBar) niceMiles = s;
+        }
+
+        const barWorldUnits = niceMiles / milesPerUnit;
+        const barPx = barWorldUnits * camera.scale;
+
+        // Position: bottom-right with padding
+        const pad = 20;
+        const barX = this.canvas.width - pad - barPx;
+        const barY = this.canvas.height - pad;
+
+        const overlayBg = this.getOverlayBackground();
+        const overlayText = this.getOverlayText();
+
+        // Background
+        ctx.fillStyle = overlayBg;
+        ctx.fillRect(barX - 8, barY - 20, barPx + 16, 28);
+
+        // Bar line
+        ctx.strokeStyle = overlayText;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Left tick
+        ctx.moveTo(barX, barY - 4);
+        ctx.lineTo(barX, barY);
+        // Horizontal
+        ctx.lineTo(barX + barPx, barY);
+        // Right tick
+        ctx.lineTo(barX + barPx, barY - 4);
+        ctx.stroke();
+
+        // Label
+        const label = niceMiles >= 1 ? `${niceMiles} mi` : `${niceMiles * 5280} ft`;
+        ctx.fillStyle = overlayText;
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(label, barX + barPx / 2, barY - 4);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
     }
 
     /**

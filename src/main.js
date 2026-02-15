@@ -190,12 +190,122 @@ class MapGenerator {
             }
 
             this.world.addPOI(poi);
+
+            // Apply biome override if specified
+            if (poiData.biome) {
+                const radius = poiData.biomeRadius ?? 3;
+                this.applyBiomeOverride(tile, poiData.biome, radius);
+            }
+
             addedCount++;
         }
 
         if (addedCount > 0) {
             console.log(`Added ${addedCount} custom POIs from config`);
         }
+    }
+
+    /**
+     * Apply POI replacements from config
+     * Matches generated POIs by name and overrides specified fields
+     */
+    applyPOIReplacements() {
+        const cfg = configLoader.getConfig();
+        const replacements = cfg.replacePOIs || [];
+
+        if (replacements.length === 0) return;
+
+        let replacedCount = 0;
+        for (const repl of replacements) {
+            if (!repl.match) {
+                console.warn('replacePOIs entry missing "match" field:', repl);
+                continue;
+            }
+
+            // Find the POI by name
+            let target = null;
+            for (const poi of this.world.pois.values()) {
+                if (poi.name === repl.match) {
+                    target = poi;
+                    break;
+                }
+            }
+
+            if (!target) {
+                console.warn(`replacePOIs: no POI found matching "${repl.match}"`);
+                continue;
+            }
+
+            // Apply overrides
+            if (repl.name !== undefined) target.name = repl.name;
+            if (repl.type !== undefined) target.type = repl.type;
+            if (repl.size !== undefined) target.size = repl.size;
+            if (repl.population !== undefined) target.population = repl.population;
+            if (repl.description !== undefined) target.description = repl.description;
+            if (repl.minZoom !== undefined) target.minZoom = repl.minZoom;
+            if (repl.maxZoom !== undefined) target.maxZoom = repl.maxZoom;
+
+            // Apply biome override around the POI's tile
+            if (repl.biome) {
+                const tile = this.world.getTile(target.tileId);
+                if (tile) {
+                    const radius = repl.biomeRadius ?? 3;
+                    this.applyBiomeOverride(tile, repl.biome, radius);
+                }
+            }
+
+            replacedCount++;
+            console.log(`Replaced POI "${repl.match}" → "${target.name}"`);
+        }
+
+        if (replacedCount > 0) {
+            console.log(`Applied ${replacedCount} POI replacements from config`);
+        }
+    }
+
+    /**
+     * Override the biome on tiles radiating outward from a center tile
+     * Uses BFS rings with blending at the edges for a natural transition
+     * @param {Tile} centerTile - The tile to start from
+     * @param {string} biome - Biome name to apply (e.g. 'temperate_forest')
+     * @param {number} radius - Number of rings outward from center
+     */
+    applyBiomeOverride(centerTile, biome, radius) {
+        centerTile.biome = biome;
+
+        if (radius <= 0) return;
+
+        const visited = new Set([centerTile.id]);
+        let currentRing = [centerTile];
+        let changed = 1;
+
+        for (let ring = 1; ring <= radius; ring++) {
+            const nextRing = [];
+            for (const tile of currentRing) {
+                for (const neighborId of tile.neighbors) {
+                    if (visited.has(neighborId)) continue;
+                    visited.add(neighborId);
+
+                    const neighbor = this.world.getTile(neighborId);
+                    if (!neighbor || neighbor.isWater) continue;
+
+                    if (ring < radius) {
+                        // Inner rings: full biome override
+                        neighbor.biome = biome;
+                    } else {
+                        // Outer ring: blend toward the new biome for soft edges
+                        neighbor.blendBiome = biome;
+                        neighbor.blendFactor = 0.5;
+                    }
+
+                    nextRing.push(neighbor);
+                    changed++;
+                }
+            }
+            currentRing = nextRing;
+        }
+
+        console.log(`Biome override: set ${changed} tiles to "${biome}" (radius ${radius})`);
     }
 
     /**
@@ -435,8 +545,22 @@ class MapGenerator {
         // Add custom POIs from config (after regions so they get regionId)
         this.addCustomPOIs();
 
+        // Apply POI replacements (rename/modify generated POIs)
+        this.applyPOIReplacements();
+
         // Generate roads (connect POIs with pathfinding)
         this.roadGenerator.generate(this.world);
+
+        // Pre-build road type lookup for O(1) edge queries
+        this.roadEdgeTypes = new Map();
+        for (const road of this.world.getAllRoads()) {
+            const tileIds = road.tileIds;
+            for (let i = 0; i < tileIds.length - 1; i++) {
+                const a = tileIds[i], b = tileIds[i + 1];
+                const key = a < b ? `${a}-${b}` : `${b}-${a}`;
+                this.roadEdgeTypes.set(key, road.type);
+            }
+        }
 
         // Set zoom thresholds from config
         this.world.setZoomThresholds(CONFIG.subtiles?.zoomThresholds || [0, 40, 60, 80]);
@@ -482,21 +606,25 @@ class MapGenerator {
      */
     renderWorld(ctx, camera) {
         const { worldWidth, worldHeight } = this.config;
+        const viewport = camera.getViewport();
 
         // Update sub-tile loading based on viewport and zoom
         if (this.tileLoadManager) {
-            const viewport = camera.getViewport();
             this.tileLoadManager.update(viewport, camera.zoom);
         }
 
+        // Cache viewport tile queries for this frame (avoid redundant spatial lookups)
+        const viewportTiles = this.world.getTilesInViewport(viewport, camera.zoom);
+        const level0Tiles = this.world.getLevel0TilesInViewport(viewport);
+
         // Draw tiles
-        this.drawTiles(ctx, camera);
+        this.drawTiles(ctx, camera, viewportTiles);
 
         // Draw rivers
-        this.drawRivers(ctx, camera);
+        this.drawRivers(ctx, camera, level0Tiles);
 
         // Draw roads
-        this.drawRoads(ctx, camera);
+        this.drawRoads(ctx, camera, level0Tiles);
 
         // Draw city streets and buildings when in city mode
         if (this.tileLoadManager && this.tileLoadManager.isInCityMode()) {
@@ -506,8 +634,8 @@ class MapGenerator {
 
         // Draw region borders and selection (if enabled)
         if (this.showRegions) {
-            this.drawRegionBorders(ctx, camera);
-            this.drawSelectedRegion(ctx, camera);
+            this.drawRegionBorders(ctx, camera, viewportTiles);
+            this.drawSelectedRegion(ctx, camera, viewportTiles);
         }
 
         // Draw POIs
@@ -525,49 +653,52 @@ class MapGenerator {
     }
 
     /**
-     * Draw Voronoi tiles
+     * Draw Voronoi tiles (batched by fill color using cached Path2D)
      */
-    drawTiles(ctx, camera) {
+    drawTiles(ctx, camera, tiles) {
         if (!this.world) return;
 
-        const viewport = camera.getViewport();
-        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
-
-        for (const tile of tiles) {
-            const vertices = tile.vertices;
-            if (vertices.length < 3) continue;
-
-            if (this.showGradientBlend) {
-                // Draw with directional gradients toward each neighbor
+        if (this.showGradientBlend) {
+            // Gradient mode: per-tile gradient draws (cannot batch)
+            for (const tile of tiles) {
+                if (tile.vertices.length < 3) continue;
                 this.drawTileWithGradient(ctx, tile);
-            } else {
-                // Draw solid color
+            }
+        } else {
+            // Batch tiles by fill color for fewer state changes
+            const colorGroups = new Map();
+            for (const tile of tiles) {
+                const path = tile.getPath2D();
+                if (!path) continue;
                 const fillColor = this.theme.getTileColor(tile);
-                ctx.beginPath();
-                ctx.moveTo(vertices[0][0], vertices[0][1]);
-                for (let i = 1; i < vertices.length; i++) {
-                    ctx.lineTo(vertices[i][0], vertices[i][1]);
+                let group = colorGroups.get(fillColor);
+                if (!group) {
+                    group = [];
+                    colorGroups.set(fillColor, group);
                 }
-                ctx.closePath();
-                ctx.fillStyle = fillColor;
-                ctx.fill();
-                // Add thin stroke in same color to cover anti-aliasing gaps
-                ctx.strokeStyle = fillColor;
-                ctx.lineWidth = 1 / camera.scale;
-                ctx.stroke();
+                group.push(path);
             }
 
-            // Stroke outline (if enabled)
-            if (this.showTileBorders) {
-                ctx.beginPath();
-                ctx.moveTo(vertices[0][0], vertices[0][1]);
-                for (let i = 1; i < vertices.length; i++) {
-                    ctx.lineTo(vertices[i][0], vertices[i][1]);
+            // Fill + anti-aliasing gap stroke batched per color
+            const gapWidth = 1 / camera.scale;
+            for (const [color, paths] of colorGroups) {
+                ctx.fillStyle = color;
+                ctx.strokeStyle = color;
+                ctx.lineWidth = gapWidth;
+                for (const path of paths) {
+                    ctx.fill(path);
+                    ctx.stroke(path);
                 }
-                ctx.closePath();
-                ctx.strokeStyle = this.theme.getTileStroke();
-                ctx.lineWidth = 1 / camera.scale;
-                ctx.stroke();
+            }
+        }
+
+        // Tile borders (if enabled) — batch into a single stroke pass
+        if (this.showTileBorders) {
+            ctx.strokeStyle = this.theme.getTileStroke();
+            ctx.lineWidth = 1 / camera.scale;
+            for (const tile of tiles) {
+                const path = tile.getPath2D();
+                if (path) ctx.stroke(path);
             }
         }
     }
@@ -654,22 +785,9 @@ class MapGenerator {
         const edgeNeighbors = new Map();
 
         for (const neighborId of tile.neighbors) {
-            const neighbor = this.world.getTile(neighborId);
-            if (!neighbor) continue;
-
-            // Find shared vertices between tile and neighbor
-            const sharedVerts = [];
-            for (const v1 of tile.vertices) {
-                for (const v2 of neighbor.vertices) {
-                    if (Math.abs(v1[0] - v2[0]) < 0.01 && Math.abs(v1[1] - v2[1]) < 0.01) {
-                        sharedVerts.push(v1);
-                        break;
-                    }
-                }
-            }
-
-            if (sharedVerts.length >= 2) {
-                const edgeKey = this.makeEdgeKey(sharedVerts[0], sharedVerts[1]);
+            const sharedEdge = this.world.getSharedEdge(tile.id, neighborId);
+            if (sharedEdge) {
+                const edgeKey = this.makeEdgeKey(sharedEdge[0], sharedEdge[1]);
                 edgeNeighbors.set(edgeKey, neighborId);
             }
         }
@@ -1107,7 +1225,7 @@ class MapGenerator {
                 for (let level = minorInterval; level < 1; level += minorInterval) {
                     if (minElev < level && maxElev >= level) {
                         const isMajor = Math.abs(level % majorInterval) < 0.01;
-                        const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                        const sharedEdge = this.world.getSharedEdge(tile.id, neighborId);
                         if (!sharedEdge) continue;
 
                         // Draw contour segment along shared edge
@@ -1130,12 +1248,8 @@ class MapGenerator {
      * Draw all river edges - handles branches and junctions
      * Uses multi-pass rendering for feathered edges
      */
-    drawRivers(ctx, camera) {
+    drawRivers(ctx, camera, tiles) {
         if (!this.world) return;
-
-        const viewport = camera.getViewport();
-        // Use level-0 tiles only (rivers are stored on base tiles, not sub-tiles)
-        const tiles = this.world.getTilesAtLevel(0).filter(t => t.intersectsViewport(viewport));
 
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -1155,7 +1269,7 @@ class MapGenerator {
                 const neighbor = this.world.getTile(neighborId);
                 if (!neighbor) continue;
 
-                const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                const sharedEdge = this.world.getSharedEdge(tile.id, neighborId);
                 if (!sharedEdge) continue;
 
                 const flow = Math.min((tile.riverFlow || 1) + (neighbor.riverFlow || 1), 20) / 2;
@@ -1232,12 +1346,9 @@ class MapGenerator {
     /**
      * Draw roads connecting POIs
      */
-    drawRoads(ctx, camera) {
+    drawRoads(ctx, camera, tiles) {
         if (!this.world) return;
 
-        const viewport = camera.getViewport();
-        // Use level-0 tiles only (roads are stored on base tiles, not sub-tiles)
-        const tiles = this.world.getTilesAtLevel(0).filter(t => t.intersectsViewport(viewport));
         const drawnEdges = new Set();
 
         const config = CONFIG.roads?.rendering || {};
@@ -1296,22 +1407,12 @@ class MapGenerator {
     }
 
     /**
-     * Get road type for a tile edge by checking road metadata
+     * Get road type for a tile edge (O(1) lookup from pre-built map)
      */
     getRoadTypeForEdge(tileId1, tileId2) {
-        if (!this.world) return 'path';
-
-        // Check roads to find type
-        for (const road of this.world.getAllRoads()) {
-            const tiles = road.tileIds;
-            for (let i = 0; i < tiles.length - 1; i++) {
-                if ((tiles[i] === tileId1 && tiles[i + 1] === tileId2) ||
-                    (tiles[i] === tileId2 && tiles[i + 1] === tileId1)) {
-                    return road.type;
-                }
-            }
-        }
-        return 'path';  // Default
+        if (!this.roadEdgeTypes) return 'path';
+        const key = tileId1 < tileId2 ? `${tileId1}-${tileId2}` : `${tileId2}-${tileId1}`;
+        return this.roadEdgeTypes.get(key) || 'path';
     }
 
     /**
@@ -1457,11 +1558,9 @@ class MapGenerator {
     /**
      * Draw region borders between different kingdoms
      */
-    drawRegionBorders(ctx, camera) {
+    drawRegionBorders(ctx, camera, tiles) {
         if (!this.world) return;
 
-        const viewport = camera.getViewport();
-        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
         const drawnEdges = new Set();
 
         const config = CONFIG.regions || {};
@@ -1487,7 +1586,7 @@ class MapGenerator {
 
                 // Draw border if different regions (and neighbor has a region)
                 if (tile.regionId !== neighbor.regionId && neighbor.regionId !== null) {
-                    const sharedEdge = this.findSharedEdge(tile.vertices, neighbor.vertices);
+                    const sharedEdge = this.world.getSharedEdge(tile.id, neighborId);
                     if (!sharedEdge) continue;
 
                     // Get region color for border
@@ -1509,11 +1608,8 @@ class MapGenerator {
     /**
      * Draw highlight outline around the selected region's tiles
      */
-    drawSelectedRegion(ctx, camera) {
+    drawSelectedRegion(ctx, camera, tiles) {
         if (!this.world || this.selectedRegionId === null) return;
-
-        const viewport = camera.getViewport();
-        const tiles = this.world.getTilesInViewport(viewport, camera.zoom);
 
         // Get region color
         const region = this.world.getRegion(this.selectedRegionId);
@@ -1543,7 +1639,7 @@ class MapGenerator {
                 const isDifferentRegion = !neighbor || neighbor.regionId !== this.selectedRegionId;
                 if (isDifferentRegion) {
                     const sharedEdge = neighbor
-                        ? this.findSharedEdge(tile.vertices, neighbor.vertices)
+                        ? this.world.getSharedEdge(tile.id, neighborId)
                         : null;
 
                     if (sharedEdge) {
@@ -1555,25 +1651,6 @@ class MapGenerator {
                 }
             }
         }
-    }
-
-    /**
-     * Find the shared edge between two tile polygons
-     */
-    findSharedEdge(verticesA, verticesB) {
-        const shared = [];
-        const epsilon = 0.001;
-
-        for (const vA of verticesA) {
-            for (const vB of verticesB) {
-                if (Math.abs(vA[0] - vB[0]) < epsilon && Math.abs(vA[1] - vB[1]) < epsilon) {
-                    shared.push(vA);
-                    break;
-                }
-            }
-        }
-
-        return shared.length >= 2 ? [shared[0], shared[1]] : null;
     }
 
     /**

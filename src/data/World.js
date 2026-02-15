@@ -27,6 +27,61 @@ export class World {
 
         // Road storage
         this.roads = new Map();             // roadId -> road metadata
+
+        // Spatial grid index for fast viewport queries
+        this._gridCellSize = 40;
+        this._gridCols = Math.ceil(this.width / this._gridCellSize);
+        this._gridRows = Math.ceil(this.height / this._gridCellSize);
+        this._grid = new Array(this._gridCols * this._gridRows).fill(null);
+
+        // Lazy cache: shared edges between neighboring tiles
+        this._sharedEdges = new Map();
+    }
+
+    /**
+     * Insert tile into spatial grid based on its bounds
+     */
+    _gridInsert(tile) {
+        const bounds = tile.getBounds();
+        const colMin = Math.max(0, Math.floor(bounds.minX / this._gridCellSize));
+        const colMax = Math.min(this._gridCols - 1, Math.floor(bounds.maxX / this._gridCellSize));
+        const rowMin = Math.max(0, Math.floor(bounds.minY / this._gridCellSize));
+        const rowMax = Math.min(this._gridRows - 1, Math.floor(bounds.maxY / this._gridCellSize));
+
+        for (let r = rowMin; r <= rowMax; r++) {
+            for (let c = colMin; c <= colMax; c++) {
+                const idx = r * this._gridCols + c;
+                if (!this._grid[idx]) {
+                    this._grid[idx] = [tile.id];
+                } else {
+                    this._grid[idx].push(tile.id);
+                }
+            }
+        }
+    }
+
+    /**
+     * Remove tile from spatial grid
+     */
+    _gridRemove(tileId) {
+        const tile = this.tiles.get(tileId);
+        if (!tile) return;
+        const bounds = tile.getBounds();
+        const colMin = Math.max(0, Math.floor(bounds.minX / this._gridCellSize));
+        const colMax = Math.min(this._gridCols - 1, Math.floor(bounds.maxX / this._gridCellSize));
+        const rowMin = Math.max(0, Math.floor(bounds.minY / this._gridCellSize));
+        const rowMax = Math.min(this._gridRows - 1, Math.floor(bounds.maxY / this._gridCellSize));
+
+        for (let r = rowMin; r <= rowMax; r++) {
+            for (let c = colMin; c <= colMax; c++) {
+                const idx = r * this._gridCols + c;
+                const cell = this._grid[idx];
+                if (cell) {
+                    const pos = cell.indexOf(tileId);
+                    if (pos !== -1) cell.splice(pos, 1);
+                }
+            }
+        }
     }
 
     /**
@@ -37,6 +92,7 @@ export class World {
         if (tile.id >= this.nextId) {
             this.nextId = tile.id + 1;
         }
+        this._gridInsert(tile);
     }
 
     /**
@@ -54,20 +110,96 @@ export class World {
     }
 
     /**
-     * Get tiles visible in viewport at current zoom
+     * Get tiles visible in viewport at current zoom (uses spatial grid)
      */
     getTilesInViewport(viewport, zoom) {
-        const visible = [];
-        for (const tile of this.tiles.values()) {
-            // Check zoom visibility
-            if (zoom < tile.minZoom || zoom > tile.maxZoom) continue;
+        const colMin = Math.max(0, Math.floor(viewport.minX / this._gridCellSize));
+        const colMax = Math.min(this._gridCols - 1, Math.floor(viewport.maxX / this._gridCellSize));
+        const rowMin = Math.max(0, Math.floor(viewport.minY / this._gridCellSize));
+        const rowMax = Math.min(this._gridRows - 1, Math.floor(viewport.maxY / this._gridCellSize));
 
-            // Check viewport intersection
-            if (tile.intersectsViewport(viewport)) {
-                visible.push(tile);
+        const seen = new Set();
+        const visible = [];
+
+        for (let r = rowMin; r <= rowMax; r++) {
+            for (let c = colMin; c <= colMax; c++) {
+                const cell = this._grid[r * this._gridCols + c];
+                if (!cell) continue;
+                for (const tileId of cell) {
+                    if (seen.has(tileId)) continue;
+                    seen.add(tileId);
+                    const tile = this.tiles.get(tileId);
+                    if (!tile) continue;
+                    if (zoom < tile.minZoom || zoom > tile.maxZoom) continue;
+                    if (tile.intersectsViewport(viewport)) {
+                        visible.push(tile);
+                    }
+                }
             }
         }
         return visible;
+    }
+
+    /**
+     * Get level-0 tiles visible in viewport (for rivers/roads)
+     */
+    getLevel0TilesInViewport(viewport) {
+        const colMin = Math.max(0, Math.floor(viewport.minX / this._gridCellSize));
+        const colMax = Math.min(this._gridCols - 1, Math.floor(viewport.maxX / this._gridCellSize));
+        const rowMin = Math.max(0, Math.floor(viewport.minY / this._gridCellSize));
+        const rowMax = Math.min(this._gridRows - 1, Math.floor(viewport.maxY / this._gridCellSize));
+
+        const seen = new Set();
+        const visible = [];
+
+        for (let r = rowMin; r <= rowMax; r++) {
+            for (let c = colMin; c <= colMax; c++) {
+                const cell = this._grid[r * this._gridCols + c];
+                if (!cell) continue;
+                for (const tileId of cell) {
+                    if (seen.has(tileId)) continue;
+                    seen.add(tileId);
+                    const tile = this.tiles.get(tileId);
+                    if (!tile || tile.zoomLevel !== 0) continue;
+                    if (tile.intersectsViewport(viewport)) {
+                        visible.push(tile);
+                    }
+                }
+            }
+        }
+        return visible;
+    }
+
+    /**
+     * Get the shared edge between two neighboring tiles (lazy cached)
+     */
+    getSharedEdge(tileId1, tileId2) {
+        const key = tileId1 < tileId2 ? `${tileId1}-${tileId2}` : `${tileId2}-${tileId1}`;
+        const cached = this._sharedEdges.get(key);
+        if (cached !== undefined) return cached;
+
+        const tile1 = this.tiles.get(tileId1);
+        const tile2 = this.tiles.get(tileId2);
+        if (!tile1 || !tile2) {
+            this._sharedEdges.set(key, null);
+            return null;
+        }
+
+        const shared = [];
+        const epsilon = 0.001;
+        for (const vA of tile1.vertices) {
+            for (const vB of tile2.vertices) {
+                if (Math.abs(vA[0] - vB[0]) < epsilon && Math.abs(vA[1] - vB[1]) < epsilon) {
+                    shared.push(vA);
+                    break;
+                }
+            }
+            if (shared.length === 2) break;
+        }
+
+        const edge = shared.length >= 2 ? [shared[0], shared[1]] : null;
+        this._sharedEdges.set(key, edge);
+        return edge;
     }
 
     /**
@@ -122,6 +254,7 @@ export class World {
         // Recursively unload grandchildren first
         for (const childId of childIds) {
             this.unloadChildren(childId);
+            this._gridRemove(childId);
             this.tiles.delete(childId);
         }
 
@@ -352,6 +485,8 @@ export class World {
         this.nextPoiId = 0;
         this.regions.clear();
         this.roads.clear();
+        this._grid = new Array(this._gridCols * this._gridRows).fill(null);
+        this._sharedEdges.clear();
     }
 
     /**

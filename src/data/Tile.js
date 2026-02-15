@@ -88,11 +88,14 @@ export class Tile {
     }
 
     /**
-     * Get bounding box of tile vertices
+     * Get bounding box of tile vertices (cached after first call)
      */
     getBounds() {
+        if (this._bounds) return this._bounds;
+
         if (this.vertices.length === 0) {
-            return { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            this._bounds = { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+            return this._bounds;
         }
 
         let minX = Infinity, minY = Infinity;
@@ -105,7 +108,25 @@ export class Tile {
             maxY = Math.max(maxY, y);
         }
 
-        return { minX, minY, maxX, maxY };
+        this._bounds = { minX, minY, maxX, maxY };
+        return this._bounds;
+    }
+
+    /**
+     * Get cached Path2D for this tile's polygon
+     */
+    getPath2D() {
+        if (this._path2d) return this._path2d;
+        if (this.vertices.length < 3) return null;
+
+        const path = new Path2D();
+        path.moveTo(this.vertices[0][0], this.vertices[0][1]);
+        for (let i = 1; i < this.vertices.length; i++) {
+            path.lineTo(this.vertices[i][0], this.vertices[i][1]);
+        }
+        path.closePath();
+        this._path2d = path;
+        return this._path2d;
     }
 
     /**

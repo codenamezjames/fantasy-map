@@ -1,0 +1,22 @@
+# Custom POIs for your campaign
+# Add locations as your party discovers them
+
+customPOIs:
+  # Example - remove or replace with your own
+  # - name: "Ancient Ruins"
+  #   type: ruins
+  #   position: [500, 750]
+  #   description: "Discovered by the party"
+  - name: "Temple of the Moon"
+    type: temple
+    position: [1000, 400]
+    size: large
+    description: "Sacred temple to the moon goddess"
+
+# Rename or modify generated POIs
+# "match" finds the POI by its current name, then overrides any fields you specify
+replacePOIs:
+  - match: "Mossgar"
+    name: "Willowfen Village"
+    biome: marsh
+    biomeRadius: 3
